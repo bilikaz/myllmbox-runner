@@ -1,0 +1,37 @@
+# cluster.yaml — THIS machine's physical cluster (box name → addresses). Machine-specific, like .env:
+# copy to cluster.yaml (gitignored) and fill in, or let `cluster/setup.sh` write it for you.
+#
+# Recipes reference boxes by NAME so they stay portable across clusters:
+#   cluster:
+#     boxes: [box1, box2]      # head = first box; TP = number of boxes
+#     master_port: 25000
+#
+# Per box:
+#   host         ssh / management address (where you `ssh` in and run docker)
+#   interconnect address PEERS use for cross-node traffic (NCCL/gloo/mq). = host when there's no dedicated link
+#                (e.g. 4 boxes behind one router → interconnect == host, all on 192.168.1.x)
+#   iface        that interconnect's interface name → NCCL_SOCKET_IFNAME / GLOO_SOCKET_IFNAME
+#   ib_hca       optional RDMA HCA (ConnectX/InfiniBand only) → NCCL_IB_HCA. Omit on plain ethernet.
+#   ssh_user     login user (all boxes should use the same user + repo path so the model's absolute path matches)
+
+boxes:
+  # ── Example A: boxes with a DEDICATED interconnect (e.g. DGX Spark ConnectX — a separate 169.254.x range) ──
+  box1:
+    host: 10.0.0.11             # ssh / management address
+    interconnect: 169.254.0.11  # fast link peers use for NCCL/gloo/mq
+    iface: <interconnect-iface> # e.g. enp1s0f1np1  (→ NCCL_SOCKET_IFNAME)
+    ib_hca: <rdma-hca>          # e.g. rocep1s0f1   (RDMA/ConnectX only; omit on plain ethernet)
+    ssh_user: youruser
+  box2:
+    host: 10.0.0.12
+    interconnect: 169.254.0.12
+    iface: <interconnect-iface>
+    ib_hca: <rdma-hca>
+    ssh_user: youruser
+
+  # ── Example B: plain boxes behind a router (no dedicated link → interconnect == host, no ib_hca) ──
+  # box3:
+  #   host: 192.168.1.50
+  #   interconnect: 192.168.1.50
+  #   iface: eth0
+  #   ssh_user: youruser

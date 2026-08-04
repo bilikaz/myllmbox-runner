@@ -1,0 +1,9 @@
+# ephemeral / per-box — never committed, keeps the repo clean (no spam in git status)
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.venv/
+.mbx/
+models/
+.env
+cluster.yaml

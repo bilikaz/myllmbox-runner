@@ -1,0 +1,39 @@
+# FLUX.2-dev — image generation on a single DGX Spark (GB10/SM121). Serves a PRE-QUANTIZED checkpoint.
+#
+# Two steps:
+#   1. ./quantize.sh flux2-dev            → NVFP4-quantize the BF16 source into models/myllmbox/FLUX.2-dev-nvfp4
+#                                           (offline, once — a self-contained, shareable checkpoint)
+#   2. ./run.sh flux2-dev                 → serve that pre-quant INSTANTLY (no on-the-fly quant, no JIT stall)
+#
+# GENERIC-server recipe (not vLLM): the `command:` runs server.py's FastAPI OpenAI-Images app; the runner
+# injects NO vLLM flags and fronts it with the same keepalive proxy + cloudflared tunnel. SOLO (one Spark).
+# FLUX.2-dev is Non-Commercial.
+
+server:
+  image: mbx-flux2-dev                                  # built from this recipe's Dockerfile (torchao serve stack)
+  model: /models/myllmbox/FLUX.2-dev-nvfp4              # the PRE-QUANT (from ./quantize.sh)
+  uvicorn:                                             # GENERIC FastAPI server → uvicorn <app> --host --port
+    app: server:app                                    #   port = server.port (8000, same as vLLM → uniform proxy)
+    host: 0.0.0.0
+    port: 8000
+
+  env:
+    MODEL_PATH: /models/myllmbox/FLUX.2-dev-nvfp4        # load the pre-quant directly
+    QUANT_PRELOADED: "1"                                 # → server.py loads it as-is (no on-the-fly quant)
+    SERVED_MODEL_NAME: black-forest-labs/FLUX.2-dev
+    COMPILE_BLOCKS: "0"                                  # first bring-up: skip Triton block-compile (too slow on FP4); re-enable for perf
+    DEFAULT_STEPS: "28"
+    DEFAULT_GUIDANCE: "4.0"
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+
+# ./quantize.sh reads this: how to produce the checkpoint above from the BF16 source.
+quantize:
+  source: /models/black-forest-labs/FLUX.2-dev          # BF16 base → ./download.sh black-forest-labs/FLUX.2-dev
+  model_type: diffusion                                 # diffusers pipeline
+  target: transformer                                   # quantize the denoiser; keep VAE/text-encoder BF16
+  # accuracy-critical linears kept in BF16 (verified vs FLUX.2-dev named_modules):
+  skip_modules: "proj_out,x_embedder,context_embedder,time_guidance_embed"
+  format: nvfp4                                         # default target (~4x on GB10, ~16-20GB vs 80GB BF16)
+  formats: [nvfp4, mxfp8]                               # what this model supports (quantize.sh rejects others)

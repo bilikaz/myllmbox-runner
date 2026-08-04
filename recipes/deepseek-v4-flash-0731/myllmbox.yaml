@@ -1,0 +1,67 @@
+# DeepSeek-V4-Flash-0731 — dspark speculation + fp8_ds_mla KV on 2× DGX Spark (GB10/SM121).
+# Our own image, built from vLLM PR #41834 (jasl SM12x branch) — see Dockerfile. That branch adds the
+# SM12x DeepSeek-V4 fixes (Triton fallbacks for the DeepGEMM ops, fp8 e8m0→fp32 upcast, Marlin MoE
+# cudagraph hardening) and is VALIDATED on THIS model + 2×GB10. Stock v0.26.0 lacked these → the DeepGEMM
+# /SM121 wall we fought. This is the validated config (0731 + dspark + fp8_ds_mla); v0.26.0 workarounds removed.
+#
+# DUAL-NODE: 304B MoE — needs BOTH Sparks (TP=2 across the ConnectX-7 link). The cluster: block launches
+#   head here + --headless worker on the second Spark over NCCL/RoCE (mp, no Ray). Weights local → offline.
+
+server:
+  image: mbx-deepseek-v4-flash-0731
+  model: /models/deepseek-ai/DeepSeek-V4-Flash-0731
+
+  env:
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    HF_HUB_DISABLE_XET: "1"
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+    VLLM_USE_FLASHINFER_SAMPLER: "1"
+    VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "256"
+    TORCH_CUDA_ARCH_LIST: "12.1a"
+    FLASHINFER_CUDA_ARCH_LIST: "12.1a"
+    CUTE_DSL_ARCH: "sm_121a"
+    FLASHINFER_DISABLE_VERSION_CHECK: "1"
+    DG_JIT_USE_NVRTC: "0"
+    VLLM_MARLIN_USE_ATOMIC_ADD: "1"              # correctness if Marlin MoE is picked on SM121 (harmless otherwise)
+    # RoCE NCCL (jvr0x) — the launcher sets IFNAME/HCA/DISABLE; these pin RoCE v2 over ConnectX:
+    NCCL_IB_GID_INDEX: "3"
+    NCCL_IB_ROCE_VERSION_NUM: "2"
+    NCCL_IB_ADDR_FAMILY: "AF_INET"
+    NCCL_CROSS_NIC: "1"
+    NCCL_IGNORE_CPU_AFFINITY: "1"
+    NCCL_NVLS_ENABLE: "0"
+
+  vllm:
+    gpu-memory-utilization: 0.85
+    served-model-name: deepseek-ai/DeepSeek-V4-Flash
+    trust-remote-code: true
+    pipeline-parallel-size: 1
+    distributed-executor-backend: mp            # dual-node = mp (no Ray); TP set by the launcher
+    kv-cache-dtype: fp8_ds_mla                   # native packed DS-MLA KV (what the sparse kernels want)
+    block-size: 256
+    max-model-len: 300000                        # 1M-monster capped at 300k per policy
+    max-num-seqs: 6
+    max-num-batched-tokens: 16384
+    # moe-backend: auto → Marlin (the ONLY MoE that runs on SM121; deep_gemm MoE errors "kernel does not
+    # support current device cuda" even with DeepGEMM #324 sm120 kernels + #41834. Compact-FP4 MoE is not
+    # reachable on this build — that's the SM121 tax; only b12x/CUTLASS forks avoid it).
+    enable-expert-parallel: true                 # EP — the shape every GB10 DS-V4 recipe uses (hazyumps/elsung/r0b0tlab)
+    # enforce-eager dropped → cudagraphs ON for real decode throughput (PR #41834 hardened SM12.0a capture)
+    enable-prefix-caching: true
+    enable-chunked-prefill: true
+    async-scheduling: true
+    tokenizer-mode: deepseek_v4
+    tool-call-parser: deepseek_v4
+    enable-auto-tool-choice: true
+    reasoning-parser: deepseek_v4
+    speculative-config: '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}'
+    reasoning-config: '{"reasoning_parser":"deepseek_v4","reasoning_start_str":"<think>","reasoning_end_str":"</think>"}'
+    default-chat-template-kwargs: '{"thinking":true}'    # keep thinking ON by default (our house preference)
+    generation-config: vllm
+
+cluster:                                         # TP=2 across both Sparks over the ConnectX-7 link
+  boxes: [box1, box2]                            # names resolved from cluster.yaml (host/interconnect/iface/
+                                                 # ib_hca/ssh_user) — NO machine IPs here, so the recipe is
+                                                 # portable. box 0 = head (API); set up boxes with cluster/setup.sh.
+  master_port: 25000

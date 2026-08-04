@@ -1,0 +1,31 @@
+# Holo-3.1-35B-A3B-NVFP4 — Hcompany VLM (vision on), NVFP4 (modelopt → Marlin MoE), single GB10.
+# Weights are local in ./models → served fully offline. (eugr ran this TP=2 across 2 Sparks for
+# throughput; here it's the single-node form.)
+
+server:
+  image: mbx-holo-3.1-35b                          # built by run.sh from this recipe's Dockerfile
+  model: /models/Hcompany/Holo-3.1-35B-A3B-NVFP4    # local path → offline (weights ./models → /models)
+
+  env:
+    FLASHINFER_DISABLE_VERSION_CHECK: "1"
+    VLLM_USE_FLASHINFER_MOE_FP4: "0"
+    CUTE_DSL_ARCH: sm_121a
+
+  # one flag per line, human-readable:  name: value → --name value ·  name: true → bare --name
+  vllm:
+    gpu-memory-utilization: 0.55
+    served-model-name: Hcompany/Holo-3.1-35B-A3B
+    trust-remote-code: true
+    dtype: auto
+    quantization: modelopt          # NVFP4 checkpoint
+    kv-cache-dtype: fp8
+    attention-backend: flashinfer
+    moe-backend: marlin             # W4A16 NVFP4 MoE → Marlin on GB10
+    max-model-len: 131072
+    max-num-seqs: 16
+    max-num-batched-tokens: 32768
+    enable-chunked-prefill: true
+    enable-prefix-caching: true
+    enable-auto-tool-choice: true
+    tool-call-parser: qwen3_xml
+    reasoning-parser: qwen3

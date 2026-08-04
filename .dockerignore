@@ -1,0 +1,10 @@
+# keep the base-build context tiny — none of this belongs in the image
+models/
+.venv/
+.mbx/
+old-eugr/
+.git/
+recipes/
+__pycache__/
+*.egg-info/
+.pytest_cache/
