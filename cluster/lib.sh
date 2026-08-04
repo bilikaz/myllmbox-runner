@@ -146,6 +146,20 @@ install_key() {
   ssh-copy-id -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_ed25519.pub "$tgt"
 }
 
+# Install the DEDICATED, DISPOSABLE dashboard key (id_myllmbox) on a box. This is the ONLY key the dashboard
+# container ever gets (copied in read-only) — so if it leaks you rotate JUST this key (rm ~/.ssh/id_myllmbox*,
+# strip it from each box's authorized_keys, rerun setup); the cluster admin key id_ed25519 is never exposed.
+# Idempotent, uses the passwordless ssh install_key just established (no password prompt).
+install_dashboard_key() {
+  local box="$1" tgt; tgt="$(box_target "$box")"
+  is_local "$(box_host "$box")" && { echo "  [$box] local head — dashboard reads it directly (no key)"; return; }
+  [ -f ~/.ssh/id_myllmbox ] || ssh-keygen -t ed25519 -N "" -C myllmbox-dashboard -f ~/.ssh/id_myllmbox
+  local pub; pub="$(cat ~/.ssh/id_myllmbox.pub)"
+  ssh -o BatchMode=yes -o ConnectTimeout=6 "$tgt" \
+    "mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && grep -qxF '$pub' ~/.ssh/authorized_keys || echo '$pub' >> ~/.ssh/authorized_keys" \
+    && echo "  [$box] dashboard key (id_myllmbox) authorized" || echo "  [$box] ⚠ could not authorize dashboard key"
+}
+
 # docker + GPU + models dir on a box (idempotent, read-mostly).
 provision_box() {
   local box="$1"

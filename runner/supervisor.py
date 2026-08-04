@@ -46,7 +46,7 @@ def _pid_alive(pid: Any) -> bool:
         return False
 
 
-def _spawn_proxy(cfg: dict[str, Any]) -> subprocess.Popen:
+def _spawn_proxy(cfg: dict[str, Any], dashboard_up: bool = False) -> subprocess.Popen:
     env = {
         **os.environ,
         "MBX_UPSTREAM": f"http://127.0.0.1:{_upstream_port(cfg)}",
@@ -54,9 +54,9 @@ def _spawn_proxy(cfg: dict[str, Any]) -> subprocess.Popen:
         "MBX_PING_SECS": str(cfg["proxy"]["ping_secs"]),
         "BINDING_TOKEN": cfg["binding_token"],
     }
-    # a recipe dashboard → tell the proxy to front non-/v1 paths with it. Password is OPTIONAL: set → Basic-auth
-    # gate; unset → routed ungated (the dashboard is expected to guard itself, or the user chose public).
-    if dashboard.enabled(cfg):
+    # front non-/v1 paths with the dashboard ONLY if it actually came up. Password OPTIONAL: set → Basic-auth
+    # gate; unset → routed ungated (the dashboard guards itself, or the user chose public).
+    if dashboard_up:
         env["MBX_DASHBOARD"] = f"http://127.0.0.1:{dashboard.port(cfg)}"
         env["DASHBOARD_PASSWORD"] = cfg.get("dashboard_password", "")
     logf = open(STATE / "proxy.log", "ab")
@@ -104,19 +104,24 @@ def up(cfg: dict[str, Any]) -> None:
         log.info("attach mode — expecting a model already serving on 127.0.0.1:%s", _upstream_port(cfg))
     else:
         raise SystemExit(f"unknown mode: {mode}")
+    dash_up = False
     if dashboard.enabled(cfg):
         if not cfg.get("dashboard_password"):
             log.warning("dashboard '%s' served ungated — no DASHBOARD_PASSWORD (relies on its own auth)",
                         dashboard.name(cfg))
-        dashboard.up(cfg)
-    proxy = _spawn_proxy(cfg)
+        try:
+            dashboard.up(cfg)
+            dash_up = True
+        except Exception as e:  # noqa: BLE001 — the dashboard is OPTIONAL; never let it block the model serve
+            log.warning("dashboard '%s' failed to start (%s) — serving the model WITHOUT it", dashboard.name(cfg), e)
+    proxy = _spawn_proxy(cfg, dash_up)
     tun = tunnel.spawn(cfg, STATE / "cloudflared.log")
     cluster = cfg.get("cluster") or {}
     _write_running({                                 # ONE manifest of what's up → `down`/`status` read it
         "proxy_pid": proxy.pid,
         "tunnel_pid": tun.pid,
         "cluster": cluster if len(cluster.get("nodes") or []) > 1 else {},   # so `down` stops the workers too
-        "dashboard": dashboard.name(cfg) if dashboard.enabled(cfg) else "",  # so `down` runs its down.sh
+        "dashboard": dashboard.name(cfg) if dash_up else "",                 # so `down` runs its down.sh (only if it came up)
     })
     wait_healthy(cfg)
     log.info("box is up — proxy :%s, tunnel connected (see .mbx/*.log)", cfg["proxy"]["port"])
@@ -186,6 +191,15 @@ def wait_healthy(cfg: dict[str, Any], timeout_s: int = 1800) -> None:
               f"(re-attach: docker logs -f {vllm.CONTAINER} · full stop: .venv/bin/python -m runner.cli down) ──",
               flush=True)
         tail = subprocess.Popen(["docker", "logs", "-f", "--tail", "40", vllm.CONTAINER])
+    else:
+        # not running — did it start then CRASH already (e.g. during a slow dashboard build, before we got here)?
+        exited = subprocess.run(["docker", "ps", "-aq", "-f", f"name=^{vllm.CONTAINER}$", "-f", "status=exited"],
+                                capture_output=True, text=True).stdout.strip()
+        if exited:
+            print(f"\n── {vllm.CONTAINER} exited during startup — last log lines: ──", flush=True)
+            subprocess.run(["docker", "logs", "--tail", "40", vllm.CONTAINER])
+            raise SystemExit(f"model container {vllm.CONTAINER} crashed before serving (logs above) — "
+                             f"fix the recipe and re-run.")
     try:
         while time.monotonic() < deadline:
             try:

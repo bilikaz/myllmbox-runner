@@ -44,6 +44,7 @@ preflight_reachable || { echo "✗ open ssh on the box(es) above, then rerun."; 
 for box in $BOXES; do
   echo "── $box  (ssh $(box_target "$box"), interconnect $(box_ic "$box")) ──"
   install_key "$box"
+  install_dashboard_key "$box"     # dedicated disposable key the dashboard uses (never the admin key)
   provision_box "$box"
 done
 

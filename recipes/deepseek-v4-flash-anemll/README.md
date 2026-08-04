@@ -1,4 +1,4 @@
-# ds-v4-flash-anemll
+# deepseek-v4-flash-anemll
 
 DeepSeek-V4-Flash-0731 (304B MoE) served across **2× DGX Spark** (TP=2 over the ConnectX-7 link) using
 **anemll's prebuilt dspark image** — with **dspark speculation ON** and **`nvfp4_ds_mla`** 4-bit KV, the
@@ -16,7 +16,7 @@ serves this model on our cluster before building our own image.
 Everything lives in this folder. From the repo root:
 
 ```bash
-./run.sh ds-v4-flash-anemll        # launch: model container + keepalive proxy + cloudflared tunnel
+./run.sh deepseek-v4-flash-anemll  # launch: model container + keepalive proxy + cloudflared tunnel
 ```
 
 `run.sh` reads `myllmbox.yaml`, and because it has a `cluster:` block with two `nodes`, the runner:

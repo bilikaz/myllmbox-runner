@@ -33,7 +33,7 @@ server:
     NCCL_NVLS_ENABLE: "0"
 
   vllm:
-    gpu-memory-utilization: 0.85
+    gpu-memory-utilization: 0.88
     served-model-name: deepseek-ai/DeepSeek-V4-Flash
     trust-remote-code: true
     pipeline-parallel-size: 1
@@ -59,9 +59,16 @@ server:
     reasoning-config: '{"reasoning_parser":"deepseek_v4","reasoning_start_str":"<think>","reasoning_end_str":"</think>"}'
     default-chat-template-kwargs: '{"thinking":true}'    # keep thinking ON by default (our house preference)
     generation-config: vllm
+    # server-side sampling DEFAULTS (client still overrides per-param). Model ships none (temp 1.0/top_p 1.0).
+    # DeepSeek's recommended temp 0.6 IS the anti-loop measure. NO repetition/frequency/presence penalty:
+    # it corrupts JSON/code/tool-calls (penalises the repeated }/"/, tokens → garbage closing braces).
+    # The "Let me look…" loop is a GREEDY-client bug — don't send temperature:0 on this model (≥0.3, 0.6 rec).
+    override-generation-config: '{"temperature":0.6,"top_p":0.95}'
 
 cluster:                                         # TP=2 across both Sparks over the ConnectX-7 link
   boxes: [box1, box2]                            # names resolved from cluster.yaml (host/interconnect/iface/
                                                  # ib_hca/ssh_user) — NO machine IPs here, so the recipe is
                                                  # portable. box 0 = head (API); set up boxes with cluster/setup.sh.
   master_port: 25000
+
+dashboard: sparkdash                             # mia → dashboards/sparkdash/ (proxy fronts non-/v1, gated by DASHBOARD_PASSWORD)

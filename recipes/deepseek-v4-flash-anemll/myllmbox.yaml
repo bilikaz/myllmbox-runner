@@ -1,4 +1,4 @@
-# ds-v4-flash-anemll — TEST: does anemll's dspark image serve DS-V4-Flash-0731 WITH dspark on our cluster?
+# deepseek-v4-flash-anemll — TEST: does anemll's dspark image serve DS-V4-Flash-0731 WITH dspark on our cluster?
 # Reference point before we build our own 0.26 image. anemll's NATIVE config: flashinfer_b12x MoE + b12x env
 # + dspark speculation ON. If this serves, 0.25/0.26 has the dspark decode → our 0.26 build will too.
 # If it hits the same sparse-decode assert, the vLLM version isn't the cause (suspect arch 12.0 vs 12.1a).
@@ -41,7 +41,7 @@ server:
     distributed-executor-backend: mp
     kv-cache-dtype: nvfp4_ds_mla                 # jvr0x's original 4-bit DS-MLA KV — faithful reference, to compare vs fp8_ds_mla
     block-size: 256
-    max-model-len: 300000
+    max-model-len: 600000
     max-num-seqs: 6
     max-num-batched-tokens: 8192
     max-cudagraph-capture-size: 36
@@ -58,8 +58,16 @@ server:
     reasoning-config: '{"reasoning_parser":"deepseek_v4","reasoning_start_str":"<think>","reasoning_end_str":"</think>"}'
     default-chat-template-kwargs: '{"thinking":false}'
     generation-config: vllm
+    # server-side sampling DEFAULTS (client still overrides per-param). Model ships none (temp 1.0/top_p 1.0).
+    # DeepSeek's recommended temp 0.6 IS the anti-loop measure. NO repetition/frequency/presence penalty:
+    # it corrupts JSON/code/tool-calls (penalises the repeated }/"/, tokens they legitimately need → garbage).
+    # The "Let me look… Let me check…" loop is a GREEDY-client bug — a coding agent must not send temperature:0
+    # on this model (use ≥0.3, 0.6 recommended); at temp 0 no penalty-free server knob can save it.
+    override-generation-config: '{"temperature":0.6,"top_p":0.95}'
 
 cluster:
   boxes: [box1, box2]                  # resolved from cluster.yaml (host/interconnect/iface/ib_hca/ssh_user);
                                        # box 0 = head. No machine IPs here — portable. Set up via cluster/setup.sh.
   master_port: 25000
+
+dashboard: sparkdash                   # mia → dashboards/sparkdash/ (proxy fronts non-/v1, gated by DASHBOARD_PASSWORD)
