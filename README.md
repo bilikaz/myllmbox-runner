@@ -46,9 +46,20 @@ cluster:                               # OMIT for single-node. Present = serve O
   boxes: [box1, box2]                  #   names defined in cluster.yaml (host/interconnect/iface/ib_hca/
                                        #   ssh_user). box 0 = head (runs the API); the rest join --headless.
   master_port: 25000                   #   No machine IPs in the recipe → portable. Provision: cluster/setup.sh
+
+dashboard:                             # OPTIONAL web UI, fronted at the SAME public URL as the model.
+  image: ghcr.io/miaai-lab/sparkdash   #   ANY container that serves a UI on `port` — this is your taste.
+  port: 5555
+  mounts: [~/.ssh:/root/.ssh:ro]       #   whatever THAT UI needs (sparkDash ssh's to boxes for metrics)
 ```
 
 `extra_args` is a **dict** (readable), not a list. `true` → bare flag; a value → `--name value`; `false`/null → skipped.
+
+**The dashboard is a pattern, not a product.** Set `dashboard.image` in a recipe and a `DASHBOARD_PASSWORD`
+in `.env`, and the proxy routes `/v1/*` to the model and **every other path** to that UI, behind HTTP Basic
+auth (so a UI with no auth of its own — e.g. one with a shutdown button — is safe to reach through the tunnel).
+The runner is UI-agnostic: swap the image for whatever suits you — sparkDash/mia, a "robot", your own stats
+page — same routing, same URL. No `dashboard:` block → the box is model-only, exactly as before.
 
 **Nothing here is enforced.** The recipe is a thin pass-through, not a validated schema — `image` can be any
 docker image, `extra_args` maps to *any* vLLM flag, `env` sets any variable, `mounts` binds any host path. You

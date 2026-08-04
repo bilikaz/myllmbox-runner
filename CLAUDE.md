@@ -16,6 +16,10 @@ required fields beyond `vllm.model`, no sanitising. Whatever you put in flows st
 - **`vllm.entrypoint`** — override the image's entrypoint (e.g. `vllm` → `vllm serve`).
 - **`vllm.mounts`** — extra `host:container` binds, raw.
 - **`cluster`** — presence turns on multi-node; absence = single node. You define the nodes.
+- **`dashboard`** — OPTIONAL web UI. `dashboard.image` (+ `port`/`env`/`mounts`/`command`) is any container the
+  runner runs on the head; the proxy then sends `/v1/*` to the model and **every other path** to it, HTTP-Basic-
+  gated by `DASHBOARD_PASSWORD` (.env). UI-agnostic (sparkDash/mia, a robot, your own) — see `runner/proxy.py`,
+  `runner/dashboard.py`. No block → model-only, unchanged.
 
 So to serve a new model / try a flag / a different backend, you **edit the recipe's yaml** — you rarely touch
 `runner/`. The runner just assembles the `docker run`, launches the cluster, and fronts it with proxy+tunnel.

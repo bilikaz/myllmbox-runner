@@ -91,13 +91,20 @@ DEFAULTS: dict[str, Any] = {
     # Either way load() normalises to per-node lists (nodes/ssh_hosts/ssh_users/ifaces/ib_hcas), node 0 = head.
     "cluster": {"boxes": [], "nodes": [], "master_port": 25000, "nccl_ifname": "", "nccl_ib_hca": "", "ssh_user": ""},
     "upstream_port": 0,  # attach/recipe: where the model already listens; 0 = vllm.port
+    # dashboard: OPTIONAL web UI the recipe wants fronted under the SAME public URL. The proxy sends /v1/* to
+    # the model and EVERYTHING ELSE to this (see runner/proxy.py), Basic-auth'd by DASHBOARD_PASSWORD (.env).
+    # `image` = any container serving a UI on `port` (sparkDash/mia, a "robot", your own) — the runner just runs
+    # it on the head; nothing here is dashboard-specific. Empty image = no dashboard (proxy → model only).
+    "dashboard": {"image": "", "port": 5555, "command": "", "env": {}, "mounts": []},
     "tunnel_token": "",
     "binding_token": "",
+    "dashboard_password": "",
     "public_url": "",
 }
 
 # .env / environment → config keys (secrets and the status probe target)
-ENV_KEYS = {"TUNNEL_TOKEN": "tunnel_token", "BINDING_TOKEN": "binding_token", "PUBLIC_URL": "public_url"}
+ENV_KEYS = {"TUNNEL_TOKEN": "tunnel_token", "BINDING_TOKEN": "binding_token",
+            "DASHBOARD_PASSWORD": "dashboard_password", "PUBLIC_URL": "public_url"}
 
 
 def deep_merge(base: dict, override: dict) -> dict:

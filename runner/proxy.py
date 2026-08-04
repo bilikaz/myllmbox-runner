@@ -1,19 +1,23 @@
 """The keepalive auth proxy — the box's public face.
 
-/v1/models and /health are always public (the model card the platform's connection check probes).
-With a BINDING_TOKEN configured, everything else requires `Authorization: Bearer <token>`; with none,
-the box runs all-public — the user's explicit choice, made in .env.
+Routing:
+  · /v1/* (and /v1/models, /health) → the MODEL (vLLM / generic server). Bearer BINDING_TOKEN gates it
+    (except the public probes); SSE gets keepalive pings so Cloudflare's ~100s idle cap never cuts a stream.
+  · everything else → the DASHBOARD (sparkDash on :5555), IF a DASHBOARD_PASSWORD is set — behind HTTP Basic
+    auth (any username, that password). This is what makes the dashboard's otherwise-unauthenticated UI +
+    power actions safe to reach through the tunnel. WebSockets (sparkDash's /ws) are proxied too.
+  With no dashboard configured, the proxy behaves exactly as before: everything → the model.
 
-SSE responses get `: ping` comments whenever the upstream is quiet, so Cloudflare's ~100s idle cap never
-resets a long prefill or a mid-stream stall. Headers go out before the first upstream byte for exactly
-that reason — the pings must be able to start during prefill.
+Headers go out before the first upstream byte so the SSE pings can start during prefill.
 """
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
 
-from aiohttp import ClientSession, ClientTimeout, web
+from aiohttp import ClientSession, ClientTimeout, WSMsgType, web
 
 log = logging.getLogger("mbx.proxy")
 
@@ -31,11 +35,19 @@ _CORS = {
 }
 
 
-def make_app(upstream: str, binding_token: str = "", ping_secs: float = 30.0) -> web.Application:
+def _to_model(path: str) -> bool:
+    """The model owns the OpenAI API surface (/v1/* + the public probes); everything else is the dashboard's."""
+    return path.startswith("/v1") or path in PUBLIC
+
+
+def make_app(upstream: str, binding_token: str = "", ping_secs: float = 30.0,
+             dashboard: str = "", dashboard_password: str = "") -> web.Application:
     app = web.Application()
     app["upstream"] = upstream.rstrip("/")
     app["token"] = binding_token
     app["ping_secs"] = ping_secs
+    app["dashboard"] = dashboard.rstrip("/")          # "" → no dashboard, everything goes to the model
+    app["dash_pw"] = dashboard_password
 
     async def on_startup(a: web.Application) -> None:
         a["session"] = ClientSession(timeout=ClientTimeout(total=None, sock_connect=10))
@@ -49,9 +61,79 @@ def make_app(upstream: str, binding_token: str = "", ping_secs: float = 30.0) ->
     return app
 
 
+def _basic_ok(request: web.Request, password: str) -> bool:
+    h = request.headers.get("Authorization", "")
+    if not h.startswith("Basic "):
+        return False
+    try:
+        _user, _, passwd = base64.b64decode(h[6:]).decode("utf-8", "replace").partition(":")
+    except (binascii.Error, ValueError):
+        return False
+    return passwd == password   # any username; the password is the secret
+
+
+async def _ws_proxy(request: web.Request, base: str) -> web.StreamResponse:
+    """Relay a WebSocket both ways (sparkDash streams metrics over /ws)."""
+    ws_server = web.WebSocketResponse()
+    await ws_server.prepare(request)
+    url = ("wss" if base.startswith("https") else "ws") + base[base.index(":"):] + str(request.rel_url)
+    session = request.app["session"]
+    async with session.ws_connect(url) as ws_client:
+        async def c2s() -> None:
+            async for m in ws_client:
+                if m.type == WSMsgType.TEXT:
+                    await ws_server.send_str(m.data)
+                elif m.type == WSMsgType.BINARY:
+                    await ws_server.send_bytes(m.data)
+                else:
+                    break
+
+        async def s2c() -> None:
+            async for m in ws_server:
+                if m.type == WSMsgType.TEXT:
+                    await ws_client.send_str(m.data)
+                elif m.type == WSMsgType.BINARY:
+                    await ws_client.send_bytes(m.data)
+                else:
+                    break
+
+        await asyncio.gather(c2s(), s2c(), return_exceptions=True)
+    return ws_server
+
+
+async def _dashboard(request: web.Request) -> web.StreamResponse:
+    app = request.app
+    if app["dash_pw"] and not _basic_ok(request, app["dash_pw"]):
+        return web.Response(status=401, text="dashboard login required",
+                            headers={"WWW-Authenticate": 'Basic realm="myllmbox dashboard"'})
+    base = app["dashboard"]
+    if request.headers.get("Upgrade", "").lower() == "websocket":
+        return await _ws_proxy(request, base)
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in _HOP}
+    up = await app["session"].request(
+        request.method, base + str(request.rel_url), headers=headers,
+        data=request.content if request.body_exists else None, allow_redirects=False)
+    resp = web.StreamResponse(status=up.status)
+    for k, v in up.headers.items():
+        if k.lower() not in _HOP:
+            resp.headers[k] = v
+    await resp.prepare(request)
+    try:
+        async for chunk in up.content.iter_any():
+            await resp.write(chunk)
+    finally:
+        up.release()
+    await resp.write_eof()
+    return resp
+
+
 async def handle(request: web.Request) -> web.StreamResponse:
     app = request.app
     path = request.rel_url.path
+    # dashboard owns everything that isn't the model's OpenAI API surface (only when one is configured)
+    if app["dashboard"] and not _to_model(path):
+        return await _dashboard(request)
+
     # CORS preflight: browsers send it without the Authorization header — answer it directly, never gate it.
     if request.method == "OPTIONS":
         return web.Response(status=204, headers=_CORS)
@@ -108,9 +190,14 @@ def main() -> None:  # `python -m runner.proxy` — how the supervisor spawns it
     port = int(os.environ.get("MBX_PROXY_PORT", "8011"))
     token = os.environ.get("BINDING_TOKEN", "")
     ping = float(os.environ.get("MBX_PING_SECS", "30"))
+    dashboard = os.environ.get("MBX_DASHBOARD", "")          # e.g. http://127.0.0.1:5555 (sparkDash)
+    dash_pw = os.environ.get("DASHBOARD_PASSWORD", "")
     if not token:
         log.warning("no BINDING_TOKEN — serving FULLY PUBLIC, generation included")
-    web.run_app(make_app(upstream, token, ping), host="127.0.0.1", port=port)
+    if dashboard and not dash_pw:
+        log.warning("MBX_DASHBOARD set without DASHBOARD_PASSWORD — dashboard would be PUBLIC; not routing it")
+        dashboard = ""
+    web.run_app(make_app(upstream, token, ping, dashboard, dash_pw), host="127.0.0.1", port=port)
 
 
 if __name__ == "__main__":

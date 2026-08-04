@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from . import tunnel, vllm
+from . import dashboard, tunnel, vllm
 
 log = logging.getLogger("mbx.supervisor")
 
@@ -45,6 +45,10 @@ def _spawn_proxy(cfg: dict[str, Any]) -> subprocess.Popen:
         "MBX_PING_SECS": str(cfg["proxy"]["ping_secs"]),
         "BINDING_TOKEN": cfg["binding_token"],
     }
+    # a recipe dashboard → tell the proxy to front non-/v1 paths with it (only if a password guards it)
+    if dashboard.enabled(cfg) and cfg.get("dashboard_password"):
+        env["MBX_DASHBOARD"] = f"http://127.0.0.1:{dashboard.port(cfg)}"
+        env["DASHBOARD_PASSWORD"] = cfg["dashboard_password"]
     logf = open(STATE / "proxy.log", "ab")
     # start_new_session: own process group so Ctrl-C on run.sh (while watching the load stream) doesn't kill
     # the proxy — it's supervised via its pidfile, not the terminal (matches this module's "detached" contract).
@@ -93,6 +97,10 @@ def up(cfg: dict[str, Any]) -> None:
         log.info("attach mode — expecting a model already serving on 127.0.0.1:%s", _upstream_port(cfg))
     else:
         raise SystemExit(f"unknown mode: {mode}")
+    if dashboard.enabled(cfg):
+        if not cfg.get("dashboard_password"):
+            log.warning("dashboard.image set but no DASHBOARD_PASSWORD — the proxy won't front it (would be public)")
+        dashboard.start(cfg)
     proxy = _spawn_proxy(cfg)
     _pidfile("proxy").write_text(str(proxy.pid))
     tun = tunnel.spawn(cfg, STATE / "cloudflared.log")
@@ -126,6 +134,7 @@ def down() -> None:
         nf.unlink(missing_ok=True)
         (STATE / "ssh_user").unlink(missing_ok=True)
     vllm.stop(cfg)  # local container + any cluster workers (no-op when the model was never ours)
+    dashboard.stop()  # head-only UI container (no-op if none)
     log.info("box is down")
 
 
