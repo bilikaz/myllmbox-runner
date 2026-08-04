@@ -6,8 +6,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 IMAGE="mbx-dash-sparkdash"
 CONTAINER="mbx-dashboard"        # keep this name → default down.sh + no collision with the model container
 PORT="${PORT:-5555}"
-SRC="$HERE/src"                  # sparkDash checkout (gitignored)
-CFG="$HERE/config"; mkdir -p "$CFG"
+DATA="$HERE/.data"               # ALL runtime junk (clone + config) — the one gitignored dir per dashboard
+SRC="$DATA/src"                  # sparkDash checkout
+CFG="$DATA/config"; mkdir -p "$CFG"
 
 # 1. get + build once
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
@@ -15,10 +16,11 @@ if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   docker build -t "$IMAGE" "$SRC"
 fi
 
-# 2. SEED config/sparks.json from MBX_BOXES ONLY if absent — sparkDash owns this file after (add/edit via its
-#    UI, persisted here). Schema per what sparkDash writes: box 0 = head+local (LLM served here, metrics via
-#    /host mounts); the rest = workers reached over SSH. Do NOT clobber a file the UI already manages.
-if [ ! -f "$CFG/sparks.json" ]; then
+# 2. (RE)generate config/sparks.json from MBX_BOXES EVERY run — the recipe's box SET varies run-to-run (box1+box2
+#    now, other boxes next), so a stale list is worse than losing UI tweaks. Skip only when MBX_BOXES is empty
+#    (a manual re-run) so we don't wipe it to nothing. box 0 = head+local (LLM served here, metrics via /host
+#    mounts); the rest = workers reached over SSH (isLocal:false).
+if [ -n "${MBX_BOXES:-}" ] && [ "$MBX_BOXES" != "[]" ]; then
   python3 - "$CFG/sparks.json" <<'PY'
 import json, os, sys
 boxes = json.loads(os.environ.get("MBX_BOXES", "[]"))
@@ -32,7 +34,7 @@ sparks = [{
     "disabledDevices": [], "disabledInterfaces": [], "storagePollDisabled": False,
 } for i, b in enumerate(boxes)]
 json.dump({"sparks": sparks}, open(sys.argv[1], "w"), indent=2)
-print(f"seeded {len(sparks)} box(es)", file=sys.stderr)
+print(f"regenerated {len(sparks)} box(es)", file=sys.stderr)
 PY
 fi
 
@@ -50,7 +52,6 @@ docker run -d --name "$CONTAINER" --restart unless-stopped \
   -e BIND_HOST=127.0.0.1 -e PORT="$PORT" -e NODE_ENV=production \
   -e HOST_PROC_PATH=/host/proc -e HOST_SYS_PATH=/host/sys -e HOST_ROOT_PATH=/host/root \
   -v "$CFG:/app/config" \
-  -v "$SRC/server:/app/server" \
   "${keymount[@]}" \
   -v /proc:/host/proc:ro -v /sys:/host/sys:ro -v /:/host/root:ro \
   -v /usr/bin/nvidia-smi:/usr/bin/nvidia-smi:ro \
