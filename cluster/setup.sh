@@ -10,6 +10,12 @@ cd "$(dirname "$0")/.."                      # repo root
 # shellcheck source=cluster/lib.sh
 source cluster/lib.sh
 
+# 0. up front: this whole thing runs over ssh — if any box's ufw blocks port 22 we can't get in to fix it.
+echo "This sets up your cluster over ssh (port 22). Make sure EVERY box allows ssh first —"
+echo "if ufw is blocking it, on that box run:  sudo ufw allow OpenSSH   (otherwise setup can't connect)."
+read -rp "All boxes have ssh (port 22) open? [y/N]: " _ok
+case "$_ok" in [Yy]*) ;; *) echo "Open ssh on the boxes, then rerun cluster/setup.sh."; exit 1;; esac
+
 # 1. cluster.yaml — build it interactively if missing (you provide ip/user/password; the script fills it in).
 if [ ! -f cluster.yaml ]; then
   echo "No cluster.yaml yet — let's set up your cluster (Ctrl-C to abort)."
@@ -28,6 +34,10 @@ fi
 BOXES="$(cy_boxes)"
 [ -n "$BOXES" ] || { echo "cluster.yaml has no boxes"; exit 1; }
 echo "── boxes: $BOXES ──"
+
+# 1b. hard verify ssh reachability before touching anything (clear error + unblock instructions if not).
+echo "── checking ssh reachability (port 22) ──"
+preflight_reachable || { echo "✗ open ssh on the box(es) above, then rerun."; exit 1; }
 
 # 2. ensure each box is reachable + has docker/GPU/models dir (install_key is a no-op once ssh works, so this
 #    is safe both right after the wizard and on a rerun against an existing cluster.yaml).

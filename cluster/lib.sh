@@ -17,6 +17,27 @@ box_target() { local u h; u="$(box_user "$1")"; h="$(box_host "$1")"; [ -n "$u" 
 
 is_local() { ip -o addr 2>/dev/null | grep -qw "$1"; }   # is IP $1 on THIS machine? (→ head runs locally)
 
+# Pre-flight: every box's ssh port must be reachable BEFORE we touch anything. If a box's ufw is already
+# blocking ssh we CANNOT fix it remotely (chicken-and-egg) — error with the exact unblock command instead of
+# failing cryptically mid-run. The head is skipped (we're already on it).
+preflight_reachable() {
+  local box host bad=0
+  for box in $(cy_boxes); do
+    host="$(box_host "$box")"
+    if is_local "$host"; then echo "  [$box] $host — local head ✓"; continue; fi
+    if timeout 4 bash -c ">/dev/tcp/$host/22" 2>/dev/null; then
+      echo "  [$box] $host:22 reachable ✓"
+    else
+      echo "  ✗ [$box] cannot reach $host:22 — ssh blocked or box down." >&2
+      echo "      If its firewall is blocking ssh, on $box run (console/keyboard):" >&2
+      echo "          sudo ufw allow OpenSSH        # or: sudo ufw disable" >&2
+      echo "      then rerun. (We can't open it remotely — ssh is how we'd get in.)" >&2
+      bad=1
+    fi
+  done
+  [ "$bad" = 0 ] || return 1
+}
+
 # Ensure passwordless ssh to a raw target (user@host). ssh-copy-id prompts for the box PASSWORD the first
 # time (that's the only place we ever touch it — never stored). No-op if keys already work.
 copy_key() {  # <user@host>
@@ -138,7 +159,9 @@ provision_box() {
 ufw_allow_from() {  # <box> <peer_ip>...
   local box="$1"; shift
   [ "$#" -ge 1 ] || return 0
-  local inner="" ip
+  # ALWAYS re-allow ssh first, in the same batch — so touching ufw can never lock us out (admin ssh over the
+  # mgmt LAN AND inter-box ssh). Belt-and-suspenders: harmless if already allowed / ufw inactive.
+  local inner="ufw allow 22/tcp comment myllmbox-ssh; " ip
   for ip in "$@"; do inner+="ufw allow from $ip comment myllmbox-peer; "; done
   if is_local "$(box_host "$box")"; then sudo bash -c "$inner"
   else ssh -t "$(box_target "$box")" "sudo bash -c '$inner'"; fi

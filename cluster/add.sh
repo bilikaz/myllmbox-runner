@@ -21,6 +21,9 @@ else
   NEW="$(cy_boxes | tr ' ' '\n' | tail -1)"     # the box just appended (whatever name was confirmed)
 fi
 
+echo "── checking ssh reachability (port 22) ──"
+preflight_reachable || { echo "✗ open ssh on the box(es) above, then rerun."; exit 1; }
+
 echo "── provisioning $NEW ──"
 install_key "$NEW"
 provision_box "$NEW"
