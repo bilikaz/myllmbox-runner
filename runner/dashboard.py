@@ -1,47 +1,81 @@
-"""Optional dashboard container. The recipe's `dashboard.image` is ANY web UI (sparkDash/mia, a "robot", your
-own) — the runner is dashboard-agnostic: it just `docker run`s it on the HEAD, bound to localhost:`port`. The
-keepalive proxy then fronts every non-/v1 path with it, gated by DASHBOARD_PASSWORD (see runner/proxy.py). So
-the pattern is fixed; what loads is the recipe's taste."""
+"""Optional dashboard. A recipe's `dashboard: <name>` points at dashboards/<name>/, which owns its lifecycle:
+
+    dashboards/<name>/
+      dashboard.yaml   # just `port:` (what the proxy forwards to) + a description
+      up.sh            # does WHATEVER the UI needs: build, generate config, docker run a web container on $PORT
+      down.sh          # tears it ALL down — the head container AND anything up.sh started on other boxes
+
+The runner is UI-agnostic: it runs up.sh / down.sh and passes context in the env (PORT, DASHBOARD_PASSWORD,
+MBX_BOXES = this recipe's box set as JSON — the script shapes it, e.g. mia → sparks.json). The active dashboard
+name is marked in .mbx so `down` knows which down.sh to call. The proxy fronts 127.0.0.1:port for non-/v1 paths.
+"""
 from __future__ import annotations
 
+import json
 import logging
-import shlex
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
 
 log = logging.getLogger("mbx.dashboard")
-CONTAINER = "mbx-dashboard"
+DIR = Path("dashboards")
 
 
 def enabled(cfg: dict[str, Any]) -> bool:
-    return bool((cfg.get("dashboard") or {}).get("image"))
+    return bool((cfg.get("dashboard") or {}).get("name"))
+
+
+def name(cfg: dict[str, Any]) -> str:
+    return (cfg.get("dashboard") or {}).get("name") or ""
 
 
 def port(cfg: dict[str, Any]) -> int:
     return int((cfg.get("dashboard") or {}).get("port") or 5555)
 
 
-def start(cfg: dict[str, Any]) -> None:
-    d = cfg["dashboard"]
-    p = port(cfg)
-    stop()  # clear a stale one
-    # localhost-only publish: the dashboard is reachable ONLY through the proxy (which password-gates it),
-    # never directly. env/mounts are the recipe's job (e.g. a UI that ssh's to boxes mounts ~/.ssh + its config).
-    args = ["docker", "run", "-d", "--name", CONTAINER, "--restart", "unless-stopped",
-            "-p", f"127.0.0.1:{p}:{p}"]
-    for k, v in (d.get("env") or {}).items():
-        args += ["-e", f"{k}={v}"]
-    for m in d.get("mounts") or []:
-        host, _, dest = str(m).partition(":")
-        args += ["-v", f"{Path(host).expanduser().resolve()}:{dest or host}"]
-    args += [d["image"]]
-    cmd = d.get("command")
-    if cmd:
-        args += shlex.split(cmd) if isinstance(cmd, str) else [str(c) for c in cmd]
-    log.info("dashboard: %s on 127.0.0.1:%s (fronted by the proxy for non-/v1 paths)", d["image"], p)
-    subprocess.run(args, check=True)
+def boxes(cfg: dict[str, Any]) -> list[dict[str, str]]:
+    """This RECIPE's box set (box 0 = head), resolved from cluster.yaml — 1 for single-node, N for a cluster.
+    Handed to up.sh as MBX_BOXES; a UI that monitors boxes (mia) turns it into its own config, others ignore it."""
+    c = cfg.get("cluster") or {}
+    names, hosts = c.get("boxes") or [], c.get("ssh_hosts") or []
+    ics, users = c.get("nodes") or [], c.get("ssh_users") or []
+    if hosts:
+        return [{"name": names[i] if i < len(names) else f"box{i+1}",
+                 "role": "head" if i == 0 else "worker",
+                 "host": hosts[i],
+                 "interconnect": ics[i] if i < len(ics) else "",
+                 "ssh_user": users[i] if i < len(users) else ""} for i in range(len(hosts))]
+    return [{"name": "local", "role": "head", "host": "127.0.0.1", "interconnect": "", "ssh_user": ""}]
 
 
-def stop() -> None:
-    subprocess.run(["docker", "rm", "-f", CONTAINER], check=False, capture_output=True)
+def _env(cfg: dict[str, Any]) -> dict[str, str]:
+    e = dict(os.environ)
+    e["PORT"] = str(port(cfg))
+    e["MBX_BOXES"] = json.dumps(boxes(cfg))
+    e["DASHBOARD_PASSWORD"] = cfg.get("dashboard_password", "")
+    for k, v in ((cfg.get("dashboard") or {}).get("env") or {}).items():
+        e[k] = str(v)
+    return e
+
+
+def up(cfg: dict[str, Any]) -> None:
+    n = name(cfg)
+    script = DIR / n / "up.sh"
+    if not script.exists():
+        raise SystemExit(f"dashboard '{n}': missing {script}")
+    log.info("dashboard %s → up on 127.0.0.1:%s", n, port(cfg))
+    subprocess.run(["bash", str(script)], env=_env(cfg), check=True)
+
+
+def down(dash_name: str) -> None:
+    """Tear down a dashboard by name (from the .mbx marker). Prefer its down.sh (it knows about any cross-box
+    bits it started); fall back to removing the conventional container."""
+    if not dash_name:
+        return
+    script = DIR / dash_name / "down.sh"
+    if script.exists():
+        log.info("dashboard %s → down", dash_name)
+        subprocess.run(["bash", str(script)], check=False)
+    else:
+        subprocess.run(["docker", "rm", "-f", "mbx-dashboard"], check=False, capture_output=True)

@@ -1,0 +1,5 @@
+# sparkDash (mia) — multi-Spark monitoring UI: https://github.com/MiaAI-Lab/sparkDash
+# Shows per-box VRAM/temp/power + vLLM tokens/s, KV-cache, latency. The proxy fronts it; set DASHBOARD_PASSWORD
+# in .env to gate it (sparkDash has no auth of its own and can power boxes off, so gating it is strongly advised).
+port: 5555
+description: sparkDash — multi-unit DGX Spark + vLLM dashboard (mia)

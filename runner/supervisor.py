@@ -22,18 +22,27 @@ log = logging.getLogger("mbx.supervisor")
 STATE = Path(os.environ.get("MBX_STATE", ".mbx"))
 
 
-def _pidfile(name: str) -> Path:
-    return STATE / f"{name}.pid"
+# One manifest of everything a box started, so `down` knows exactly what to kill (pids, the resolved cluster
+# so it can stop workers, the dashboard so it can run the right down.sh). Written by `up`, read by `down`/`status`.
+RUNNING = STATE / ".running"
 
 
-def _alive(name: str) -> bool:
-    pf = _pidfile(name)
-    if not pf.exists():
-        return False
+def _write_running(d: dict[str, Any]) -> None:
+    RUNNING.write_text(json.dumps(d, indent=2))
+
+
+def _read_running() -> dict[str, Any]:
     try:
-        os.kill(int(pf.read_text()), 0)
-        return True
+        return json.loads(RUNNING.read_text())
     except (OSError, ValueError):
+        return {}
+
+
+def _pid_alive(pid: Any) -> bool:
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError, TypeError):
         return False
 
 
@@ -45,10 +54,11 @@ def _spawn_proxy(cfg: dict[str, Any]) -> subprocess.Popen:
         "MBX_PING_SECS": str(cfg["proxy"]["ping_secs"]),
         "BINDING_TOKEN": cfg["binding_token"],
     }
-    # a recipe dashboard → tell the proxy to front non-/v1 paths with it (only if a password guards it)
-    if dashboard.enabled(cfg) and cfg.get("dashboard_password"):
+    # a recipe dashboard → tell the proxy to front non-/v1 paths with it. Password is OPTIONAL: set → Basic-auth
+    # gate; unset → routed ungated (the dashboard is expected to guard itself, or the user chose public).
+    if dashboard.enabled(cfg):
         env["MBX_DASHBOARD"] = f"http://127.0.0.1:{dashboard.port(cfg)}"
-        env["DASHBOARD_PASSWORD"] = cfg["dashboard_password"]
+        env["DASHBOARD_PASSWORD"] = cfg.get("dashboard_password", "")
     logf = open(STATE / "proxy.log", "ab")
     # start_new_session: own process group so Ctrl-C on run.sh (while watching the load stream) doesn't kill
     # the proxy — it's supervised via its pidfile, not the terminal (matches this module's "detached" contract).
@@ -80,9 +90,6 @@ def up(cfg: dict[str, Any]) -> None:
     mode = cfg.get("mode", "vllm")
     if mode == "vllm":
         vllm.start(cfg)
-        ns = vllm.nodes(cfg)
-        if len(ns) > 1:  # remember the RESOLVED cluster (per-node ssh_hosts/users) so `down` stops the workers too
-            (STATE / "cluster.json").write_text(json.dumps(cfg.get("cluster") or {}))
     elif mode == "recipe":
         # the model belongs to a recipe PACK (a downloaded script collection — clusters, NCCL/ConnectX-7,
         # Ray, mods are ITS concern); the reference "<pack>/<recipe>" resolves against recipes.root
@@ -99,42 +106,58 @@ def up(cfg: dict[str, Any]) -> None:
         raise SystemExit(f"unknown mode: {mode}")
     if dashboard.enabled(cfg):
         if not cfg.get("dashboard_password"):
-            log.warning("dashboard.image set but no DASHBOARD_PASSWORD — the proxy won't front it (would be public)")
-        dashboard.start(cfg)
+            log.warning("dashboard '%s' served ungated — no DASHBOARD_PASSWORD (relies on its own auth)",
+                        dashboard.name(cfg))
+        dashboard.up(cfg)
     proxy = _spawn_proxy(cfg)
-    _pidfile("proxy").write_text(str(proxy.pid))
     tun = tunnel.spawn(cfg, STATE / "cloudflared.log")
-    _pidfile("tunnel").write_text(str(tun.pid))
+    cluster = cfg.get("cluster") or {}
+    _write_running({                                 # ONE manifest of what's up → `down`/`status` read it
+        "proxy_pid": proxy.pid,
+        "tunnel_pid": tun.pid,
+        "cluster": cluster if len(cluster.get("nodes") or []) > 1 else {},   # so `down` stops the workers too
+        "dashboard": dashboard.name(cfg) if dashboard.enabled(cfg) else "",  # so `down` runs its down.sh
+    })
     wait_healthy(cfg)
     log.info("box is up — proxy :%s, tunnel connected (see .mbx/*.log)", cfg["proxy"]["port"])
 
 
 def down() -> None:
-    # reverse order; each step idempotent — a half-up box tears down cleanly
-    for name in ("tunnel", "proxy"):
-        pf = _pidfile(name)
+    # read the manifest; each step idempotent — a half-up box tears down cleanly. Legacy .mbx files (from a
+    # box started before .running) are honoured too so an already-running box still stops.
+    st = _read_running()
+    pids = [st.get("proxy_pid"), st.get("tunnel_pid")]
+    for legacy in ("proxy.pid", "tunnel.pid"):
+        pf = STATE / legacy
         if pf.exists():
             try:
-                os.kill(int(pf.read_text()), signal.SIGTERM)
-                log.info("stopped %s", name)
-            except (OSError, ValueError):
+                pids.append(int(pf.read_text()))
+            except ValueError:
                 pass
             pf.unlink(missing_ok=True)
-    # rebuild the resolved cluster (if any) so we stop the workers too
-    cfg: dict[str, Any] = {}
-    cj = STATE / "cluster.json"
-    nf = STATE / "nodes"                                        # legacy state from an older `up`
-    if cj.exists():
-        cfg = {"cluster": json.loads(cj.read_text())}
-        cj.unlink(missing_ok=True)
-    elif nf.exists():
-        su = STATE / "ssh_user"
-        cfg = {"cluster": {"nodes": [n for n in nf.read_text().split(",") if n],
-                           "ssh_user": su.read_text() if su.exists() else ""}}
-        nf.unlink(missing_ok=True)
-        (STATE / "ssh_user").unlink(missing_ok=True)
-    vllm.stop(cfg)  # local container + any cluster workers (no-op when the model was never ours)
-    dashboard.stop()  # head-only UI container (no-op if none)
+    for pid in pids:
+        if _pid_alive(pid):
+            try:
+                os.kill(int(pid), signal.SIGTERM)
+            except (OSError, ValueError):
+                pass
+    # cluster (stop the workers too) — from .running, or legacy cluster.json / nodes
+    cluster = st.get("cluster") or {}
+    cj, nf, su = STATE / "cluster.json", STATE / "nodes", STATE / "ssh_user"
+    if not cluster and cj.exists():
+        cluster = json.loads(cj.read_text())
+    if not cluster and nf.exists():
+        cluster = {"nodes": [n for n in nf.read_text().split(",") if n],
+                   "ssh_user": su.read_text() if su.exists() else ""}
+    vllm.stop({"cluster": cluster})  # local container + any cluster workers (no-op when the model was never ours)
+    # dashboard — its down.sh (incl. anything it started on other boxes) — from .running or legacy marker
+    dash = st.get("dashboard") or ""
+    dm = STATE / "dashboard"
+    if not dash and dm.exists():
+        dash = dm.read_text().strip()
+    dashboard.down(dash)
+    for f in (RUNNING, cj, nf, su, dm):
+        f.unlink(missing_ok=True)
     log.info("box is down")
 
 
@@ -189,10 +212,22 @@ def wait_healthy(cfg: dict[str, Any], timeout_s: int = 1800) -> None:
 
 
 def status(cfg: dict[str, Any]) -> dict[str, Any]:
+    r = _read_running()
+
+    def _alive(key: str, legacy: str) -> bool:
+        if _pid_alive(r.get(key)):
+            return True
+        pf = STATE / legacy                       # a box started before .running
+        try:
+            return pf.exists() and _pid_alive(int(pf.read_text()))
+        except ValueError:
+            return False
+
     st: dict[str, Any] = {
         "vllm": vllm.running(),
-        "proxy": _alive("proxy"),
-        "tunnel": _alive("tunnel"),
+        "proxy": _alive("proxy_pid", "proxy.pid"),
+        "tunnel": _alive("tunnel_pid", "tunnel.pid"),
+        "dashboard": bool(r.get("dashboard")) or (STATE / "dashboard").exists(),
         "local_model_card": False,
         "public_model_card": None,
     }

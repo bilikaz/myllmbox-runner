@@ -7,3 +7,5 @@ __pycache__/
 models/
 .env
 cluster.yaml
+dashboards/*/src/       # a dashboard's cloned upstream (e.g. sparkDash checkout)
+dashboards/*/config/    # a dashboard's generated, machine-specific config (box IPs, etc.)

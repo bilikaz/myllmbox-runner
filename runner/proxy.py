@@ -195,8 +195,7 @@ def main() -> None:  # `python -m runner.proxy` — how the supervisor spawns it
     if not token:
         log.warning("no BINDING_TOKEN — serving FULLY PUBLIC, generation included")
     if dashboard and not dash_pw:
-        log.warning("MBX_DASHBOARD set without DASHBOARD_PASSWORD — dashboard would be PUBLIC; not routing it")
-        dashboard = ""
+        log.warning("dashboard has no DASHBOARD_PASSWORD — proxy won't gate it (relying on the UI's own auth, if any)")
     web.run_app(make_app(upstream, token, ping, dashboard, dash_pw), host="127.0.0.1", port=port)
 
 

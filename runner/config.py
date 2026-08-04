@@ -91,11 +91,12 @@ DEFAULTS: dict[str, Any] = {
     # Either way load() normalises to per-node lists (nodes/ssh_hosts/ssh_users/ifaces/ib_hcas), node 0 = head.
     "cluster": {"boxes": [], "nodes": [], "master_port": 25000, "nccl_ifname": "", "nccl_ib_hca": "", "ssh_user": ""},
     "upstream_port": 0,  # attach/recipe: where the model already listens; 0 = vllm.port
-    # dashboard: OPTIONAL web UI the recipe wants fronted under the SAME public URL. The proxy sends /v1/* to
-    # the model and EVERYTHING ELSE to this (see runner/proxy.py), Basic-auth'd by DASHBOARD_PASSWORD (.env).
-    # `image` = any container serving a UI on `port` (sparkDash/mia, a "robot", your own) — the runner just runs
-    # it on the head; nothing here is dashboard-specific. Empty image = no dashboard (proxy → model only).
-    "dashboard": {"image": "", "port": 5555, "command": "", "env": {}, "mounts": []},
+    # dashboard: OPTIONAL web UI fronted at the SAME public URL. A recipe sets `dashboard: <name>` → the runner
+    # runs dashboards/<name>/up.sh (down.sh to stop); dashboard.yaml there gives the `port`. up.sh does whatever
+    # that UI needs (build, gen config, docker run a container on $PORT). The proxy sends /v1/* to the model and
+    # EVERYTHING ELSE to 127.0.0.1:port (see runner/proxy.py), Basic-auth'd by DASHBOARD_PASSWORD (.env).
+    # No `dashboard:` → model-only. `name` empty here = disabled; _resolve_dashboard fills it from the recipe.
+    "dashboard": {"name": "", "port": 5555, "env": {}},
     "tunnel_token": "",
     "binding_token": "",
     "dashboard_password": "",
@@ -151,6 +152,22 @@ def _resolve_cluster(cfg: dict[str, Any], base_dir: str | Path = ".") -> None:
     cfg["cluster"] = c
 
 
+def _resolve_dashboard(cfg: dict[str, Any], base_dir: str | Path = ".") -> None:
+    """A recipe's `dashboard: <name>` → dashboards/<name>/dashboard.yaml (reusable across recipes). We only need
+    its `port` (what the proxy forwards to) + optional `env`; the folder's up.sh/down.sh own the rest. Mirrors
+    the recipes/ convention."""
+    d = cfg.get("dashboard")
+    if isinstance(d, str) and d:
+        p = Path(base_dir) / "dashboards" / d / "dashboard.yaml"
+        if not p.exists():
+            raise SystemExit(f"dashboard '{d}' not found — expected {p} (see dashboards/)")
+        spec = yaml.safe_load(p.read_text()) or {}
+        merged = copy.deepcopy(DEFAULTS["dashboard"])
+        merged.update({k: v for k, v in spec.items() if v is not None})
+        merged["name"] = d          # the folder name IS the identity (drives up.sh/down.sh + the .mbx marker)
+        cfg["dashboard"] = merged
+
+
 def load(cli: dict[str, Any] | None = None, env: dict[str, str] | None = None, yaml_path: str | Path | None = None) -> dict[str, Any]:
     """Merge the four layers. `env` defaults to os.environ overlaid on .env in the cwd."""
     if env is None:
@@ -182,4 +199,5 @@ def load(cli: dict[str, Any] | None = None, env: dict[str, str] | None = None, y
     else:
         cfg["public_mode"] = False
     _resolve_cluster(cfg)   # boxes/nodes → per-node lists (nodes/ssh_hosts/ssh_users/ifaces/ib_hcas)
+    _resolve_dashboard(cfg)  # dashboard: <name> → dashboards/<name>/dashboard.yaml (or an inline dict)
     return cfg

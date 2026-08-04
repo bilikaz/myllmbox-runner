@@ -16,10 +16,11 @@ required fields beyond `vllm.model`, no sanitising. Whatever you put in flows st
 - **`vllm.entrypoint`** — override the image's entrypoint (e.g. `vllm` → `vllm serve`).
 - **`vllm.mounts`** — extra `host:container` binds, raw.
 - **`cluster`** — presence turns on multi-node; absence = single node. You define the nodes.
-- **`dashboard`** — OPTIONAL web UI. `dashboard.image` (+ `port`/`env`/`mounts`/`command`) is any container the
-  runner runs on the head; the proxy then sends `/v1/*` to the model and **every other path** to it, HTTP-Basic-
-  gated by `DASHBOARD_PASSWORD` (.env). UI-agnostic (sparkDash/mia, a robot, your own) — see `runner/proxy.py`,
-  `runner/dashboard.py`. No block → model-only, unchanged.
+- **`dashboard: <name>`** — OPTIONAL web UI → `dashboards/<name>/` (its own `up.sh`/`down.sh` + a `dashboard.yaml`
+  giving `port`). The proxy sends `/v1/*` to the model and **every other path** to `127.0.0.1:port`;
+  `DASHBOARD_PASSWORD` (.env) HTTP-Basic-gates it (unset = ungated, the UI's own guard rails). UI-agnostic —
+  `up.sh` does whatever it needs and receives `$MBX_BOXES` (this recipe's box set). Runner marks the active one
+  in `.mbx/.running` so `down` runs the right `down.sh`. See `runner/proxy.py`, `runner/dashboard.py`, `dashboards/`.
 
 So to serve a new model / try a flag / a different backend, you **edit the recipe's yaml** — you rarely touch
 `runner/`. The runner just assembles the `docker run`, launches the cluster, and fronts it with proxy+tunnel.
