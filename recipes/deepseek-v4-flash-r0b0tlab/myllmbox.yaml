@@ -11,12 +11,11 @@ server:
   image: ghcr.io/r0b0tlab/deepseek-v4-flash-dspark-v026-sm121:v0.26.0-sm121-native-v11   # pinned build @sha256:ef852781efd6278cb3d908a4298874fb8b34fe84f0e1a03181ed415ec233a9d4 (tag → visible in `docker images`, removable)
   entrypoint: vllm                               # image default is robot's launcher; override → `vllm serve`
   model: /models/deepseek-ai/DeepSeek-V4-Flash-0731
-  # PERSISTENT KERNEL CACHE → /cache (mounted on BOTH nodes; each Spark keeps its own compiled kernels).
-  # THIS is why robot never sees the mHC/TileLang compile storm: his launcher mounts this same dir and the
-  # flashinfer topk256 + mHC TileLang kernels compile ONCE and are reused every boot. We drive `vllm` bare, so
-  # without this every boot recompiled from cold (~250-size warmup → the OOM/stall). Same dir NAME as robot's
-  # (${HOME}/.cache/dspark-v026-flashinfer-topk256) → reuses his cache if his launcher ever ran on these boxes.
-  cache: ~/.cache/dspark-v026-flashinfer-topk256   # host → /cache; env below points the caches under it
+  # PERSISTENT KERNEL CACHE → /cache (mounted on BOTH nodes; each Spark keeps its own compiled kernels). THIS is
+  # why the mHC/TileLang compile storm is a one-time cost: the flashinfer topk256 + mHC TileLang kernels compile
+  # ONCE and are reused every boot. We drive `vllm` bare, so without this every boot recompiled from cold
+  # (~250-size warmup → the OOM/stall). Lives in the recipe's gitignored .data/ (one place for all generated junk).
+  cache: recipes/deepseek-v4-flash-r0b0tlab/.data/cache   # host → /cache; env below points the caches under it
 
   env:
     HF_HUB_OFFLINE: "1"

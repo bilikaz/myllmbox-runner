@@ -10,3 +10,4 @@ cluster.yaml
 # a dashboard's runtime data — the ONE ignored dir per dashboard: cloned/built upstream,
 # regenerated machine-specific config (box IPs, ssh users), any generated key. Never committed.
 dashboards/*/.data/
+recipes/*/.data/
