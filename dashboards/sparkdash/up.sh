@@ -16,6 +16,16 @@ if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   docker build -t "$IMAGE" "$SRC"
 fi
 
+# 1b. fix ownership of .data. sparkDash runs as ROOT and writes into this bind mount, so files it lands come
+#     back root-owned — and the next run (us, non-root) then can't overwrite sparks.json ("PermissionError").
+#     chown the whole .data back to us via a throwaway ROOT container (docker is root → no host sudo needed).
+#     chown only changes OWNERSHIP — it deletes nothing — so src/ etc. are preserved, just owned by us again.
+if [ -d "$DATA" ]; then
+  # --entrypoint chown so the image's own ENTRYPOINT (if any) can't swallow the command; busybox is the fallback.
+  docker run --rm --entrypoint chown -v "$DATA:/data" "$IMAGE" -R "$(id -u):$(id -g)" /data >/dev/null 2>&1 \
+    || docker run --rm -v "$DATA:/data" busybox chown -R "$(id -u):$(id -g)" /data >/dev/null 2>&1 || true
+fi
+
 # 2. (RE)generate config/sparks.json from MBX_BOXES EVERY run — the recipe's box SET varies run-to-run (box1+box2
 #    now, other boxes next), so a stale list is worse than losing UI tweaks. Skip only when MBX_BOXES is empty
 #    (a manual re-run) so we don't wipe it to nothing. box 0 = head+local (LLM served here, metrics via /host
