@@ -27,6 +27,10 @@ So to serve a new model / try a flag / a different backend, you **edit the recip
 This freedom is the point; it also means **a recipe can do anything to the box** — see "Installing someone
 else's recipe" in the README before running a downloaded one.
 
+> **Site sync:** the myllmbox.com site serves user manuals (`/guides/*`) that mirror THIS repo —
+> commands, `.env` keys, script names, endpoints. When you change any of those here, the matching
+> guide on the site must change too (the site repo's `apps/ui/src/data/guides.ts` names the set).
+
 ## The three entry points (folder name = recipe)
 ```
 ./download.sh <hf-id>          # weights → models/<hf-id>
