@@ -33,7 +33,7 @@ server:
     NCCL_NVLS_ENABLE: "0"
 
   vllm:
-    gpu-memory-utilization: 0.88
+    gpu-memory-utilization: 0.89
     served-model-name: deepseek-ai/DeepSeek-V4-Flash
     trust-remote-code: true
     pipeline-parallel-size: 1
@@ -42,7 +42,7 @@ server:
     block-size: 256
     max-model-len: 300000                        # 1M-monster capped at 300k per policy
     max-num-seqs: 6
-    max-num-batched-tokens: 16384
+    max-num-batched-tokens: 12288               #rduced form 16384 to get more kv
     # moe-backend: auto → Marlin (the ONLY MoE that runs on SM121; deep_gemm MoE errors "kernel does not
     # support current device cuda" even with DeepGEMM #324 sm120 kernels + #41834. Compact-FP4 MoE is not
     # reachable on this build — that's the SM121 tax; only b12x/CUTLASS forks avoid it).
