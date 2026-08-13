@@ -58,8 +58,15 @@ if boxes:
 else:
     user = c.get("ssh_user") or ""
     targets = [f"{user}@{ip}" if user else str(ip) for ip in (c.get("nodes") or [])]
+# extra_models: additional weights the recipe needs PRESENT (LoRAs, extra text-encoders/VAEs, refiners) —
+# provisioned like the main model, referenced by the server's env (LORA_PATH, …). Top-level list of HF ids
+# (or /models/... paths). Generic on purpose: "extra model", not "lora".
+extra = cfg.get("extra_models") or []
+if isinstance(extra, str):
+    extra = [extra]
 for k, val in dict(MODEL=s.get("model") or "", MODELS_DIR=s.get("models_dir") or "models",
                    QSRC=q.get("source") or "",
+                   EXTRA_MODELS=" ".join(str(x) for x in extra),
                    WORKERS=" ".join(targets[1:])).items():   # drop head; the rest get the weights
     print(f"{k}={shlex.quote(str(val))}")
 PY
@@ -95,6 +102,31 @@ if [ -n "$MODEL" ]; then
     done
   fi
 fi
+
+# 3b-extra: extra_models — LoRAs, extra text-encoders/VAEs, refiners: any additional weights the recipe needs
+# present. Provisioned exactly like the main model (download-if-missing + worker rsync); the server's env
+# (LORA_PATH, TEXT_ENCODER_PATH, …) points at the resolved /models/<id> path. Never quantized here — an
+# extra_model that should be quantized is its own recipe with a quantize: block.
+for EM in ${EXTRA_MODELS:-}; do
+  EMID="$(strip "$EM")"
+  EMPATH="$MODELS_DIR/$EMID"
+  if [ -d "$EMPATH" ] && [ -n "$(ls -A "$EMPATH" 2>/dev/null)" ]; then
+    echo "· extra model present: $EMPATH"
+  else
+    echo "· extra model not downloaded yet → fetching $EMID"
+    ./download.sh "$EMID"
+  fi
+  if [ -n "${WORKERS:-}" ]; then
+    MODELS_ABS="$(cd "$MODELS_DIR" 2>/dev/null && pwd || echo "$PWD/$MODELS_DIR")"
+    ESRC="$MODELS_ABS/$EMID"
+    for tgt in $WORKERS; do
+      echo "· syncing extra model to worker $tgt  ($ESRC)"
+      ssh -o BatchMode=yes "$tgt" "mkdir -p '$(dirname "$ESRC")'" \
+        && rsync -a --size-only --info=progress2 -e "ssh -o BatchMode=yes" "$ESRC/" "$tgt:$ESRC/" \
+        || { echo "✗ could not sync extra model to worker $tgt"; exit 1; }
+    done
+  fi
+done
 
 # 3c. pre-flight a myllmbox torchao quant against the serve image. torchao serializes FP4 weights as versioned
 #     tensor subclasses — a torchao/torch mismatch between the box that quantized and this box's image fails
