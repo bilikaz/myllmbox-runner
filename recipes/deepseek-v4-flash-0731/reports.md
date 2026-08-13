@@ -16,7 +16,8 @@ is NOT reachable here — that's the SM121 tax). 2× DGX Spark GB10, TP=2. Same-
 | date | c | content | aggregate tok/s | per-req tok/s | mean acc len | draft accept % | KV use % | notes |
 |------|---|---------|-----------------|---------------|--------------|----------------|----------|-------|
 | _prior/memory_ | 1 | mixed | ~40–50 | ~40–50 | ~2.3–4 | — | — | remembered, NOT same-harness — re-measure |
-| _prior/memory_ | 2 | mixed | ~53 | ~26 | — | — | — | remembered, re-measure |
+| _prior/memory_ | 2 | mixed | **~70–80** | ~35–40 | — | — | — | Valdas recollection — beats B12X c2 ~53; confirm in sweep |
+| _prior/memory_ | 6 | mixed | **~120** | ~20 | — | — | — | Valdas recollection — confirm in sweep |
 | _TODO_ | 1 | structured | | | | | | measure in the shared harness |
 | _TODO_ | 1 | prose | | | | | | |
 | _TODO_ | 2 | mixed | | | | | | |
