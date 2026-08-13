@@ -226,6 +226,7 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     echo "torch==${PINNED_TORCH}" > /tmp/ov.txt && \
     echo "torchvision==${PINNED_TORCHVISION}" >> /tmp/ov.txt && \
     echo "fastapi[standard]>=0.115.0,<0.137.0" >> /tmp/ov.txt && \
+    echo "nvidia-cutlass-dsl==4.6.0" >> /tmp/ov.txt && \
     uv pip install /workspace/wheels/*.whl --override /tmp/ov.txt && \
     uv pip install ray[default] fastsafetensors instanttensor --override /tmp/ov.txt
 
@@ -428,5 +429,8 @@ ENTRYPOINT ["vllm", "serve"]
 #     point. Re-pin (git ls-remote the branches) when you want newer fork fixes.
 #   * Whether the other upstream docker/patch_vllm_*.py scripts (spark_kv_cache_cleanup,
 #     topk_softplus_sqrt, flashinfer_b12x_swigluoai) are still required on this fork.
-#   * Whether B12X needs tilelang / an explicit nvidia-cutlass-dsl pin at runtime.
+#   * nvidia-cutlass-dsl: RESOLVED — FlashInfer main (0.6.18) pins ==4.7.0 but the B12X vLLM fork pins
+#     [cu13]==4.6.0; forced to 4.6.0 in the runner override (fork wins). If FlashInfer's cutlass path
+#     misbehaves at runtime, pin FlashInfer to a 4.6.0-era commit instead of overriding.
+#   * Whether B12X needs tilelang at runtime — still TBD.
 # ======================================================================================================
