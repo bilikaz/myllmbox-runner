@@ -72,6 +72,26 @@ for k, val in dict(MODEL=s.get("model") or "", MODELS_DIR=s.get("models_dir") or
 PY
 )"
 strip() { echo "${1#/models/}"; }   # /models/org/name → org/name (the ./download.sh hf-id / host subpath)
+
+# 3a-cluster: ship the recipe IMAGE to every worker. Workers can't build it (only the head has the Dockerfile
+# context), and it's a LOCAL image (no registry to pull from) → without this a cluster serve dies with
+# "pull access denied for mbx-<recipe>" on the worker. Idempotent: skip a worker that already has the same
+# image id; re-ship after a rebuild (id changed). Makes run.sh self-sufficient — no separate build-and-copy
+# needed for cluster recipes. (build-and-copy.sh still exists for build-only, but reads legacy cluster.nodes.)
+if [ -n "${WORKERS:-}" ] && docker image inspect "mbx-$R" >/dev/null 2>&1; then
+  LOCAL_ID="$(docker image inspect -f '{{.Id}}' "mbx-$R")"
+  for tgt in $WORKERS; do
+    RID="$(ssh -o BatchMode=yes "$tgt" "docker image inspect -f '{{.Id}}' mbx-$R 2>/dev/null" </dev/null || true)"
+    if [ "$RID" = "$LOCAL_ID" ]; then
+      echo "· image mbx-$R already on $tgt (same id) — skip"
+    else
+      echo "· shipping image mbx-$R → $tgt  (docker save | ssh docker load — large, one-time per build)"
+      docker save "mbx-$R" | ssh -o BatchMode=yes "$tgt" docker load \
+        || { echo "✗ could not ship image to worker $tgt — the cluster serve will fail without it"; exit 1; }
+    fi
+  done
+fi
+
 if [ -n "$MODEL" ]; then
   HOSTPATH="$MODELS_DIR/$(strip "$MODEL")"
   if [ -d "$HOSTPATH" ] && [ -n "$(ls -A "$HOSTPATH" 2>/dev/null)" ]; then
