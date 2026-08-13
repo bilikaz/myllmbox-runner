@@ -29,5 +29,7 @@ is NOT reachable here — that's the SM121 tax). 2× DGX Spark GB10, TP=2. Same-
 - Prior rows are from memory / earlier sessions, **not** the shared A/B harness — treat as ~ until re-measured
   head-to-head with `recipes/deepseek-v4-flash` on identical prompts (same model + same dspark ⇒ same accept ⇒
   isolates per-step kernel speed, the real question).
-- Emerging verdict vs B12X: **single-stream ~parity; concurrency Marlin wins** (B12X memory-bound/swaps, scales
-  ~1.4× c1→c2 vs Marlin's stronger scaling). Lighter, less hassle. B12X kept as the fp4-MoE reference.
+- Verdict vs B12X: **UNSETTLED — needs the shared sweep.** Single-stream ~parity (~50 peak both). B12X *does*
+  scale with concurrency (c1 ~40 → c2 ~53 → c3 ~70, KV headroom) — the earlier "Marlin wins concurrency" call
+  was based on a low-accept B12X c2 window and is retracted. Marlin's structural edges remain: bigger KV pool
+  (621k vs 443k) and lighter/less-hassle build. Run the identical c1–c16 harness on both to decide.
