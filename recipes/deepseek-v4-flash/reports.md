@@ -19,13 +19,15 @@ GB10 (SM121), TP=2 over ConnectX. Same-schema companion: `recipes/deepseek-v4-fl
 | 2026-08-13 | 2 | mixed | ~52–56 (peak 65) | ~26–28 | 4.0–5.3 | 55–86% | 1.6% | low-accept window; not a wall (see c3) |
 | 2026-08-13 | 3 | mixed | ~65–72 (peak 82) | ~22–24 | 3.2–5.1 (~4.3) | 37–82% (~63%) | ~2% | healthy scaling; KV barely touched |
 | 2026-08-13 | 4 | mixed | ~78–82 (peak 99) | ~20 | 3.2–5.2 (~4.3) | 44–84% (~64%) | ~3% | scales cleanly, still climbing |
-| 2026-08-13 | 8 | — | _TODO_ | | | | | sweep pending — KV ~3%, headroom for more |
+| 2026-08-13 | 6 | mixed | ~85–95 (peak 117) | ~15 | 3.0–5.0 (~4.0) | 39–81% (~55%) | ~4% | still scaling; peak nears Marlin's recalled c6 ~120 |
+| 2026-08-13 | 8 | — | _TODO_ | | | | | sweep pending — KV ~4%, headroom remains |
 
 ## Notes / verdict
 - **Throughput is dspark-acceptance-driven → content-dependent.** Single-stream swings ~33 (56% accept) → ~51
   (100% accept, mean acc 6.0). So compare only at matched content / same-prompt harness.
-- **Single-stream: ~parity with Marlin (~50 peak).** **Concurrency: scales strongly** — c1 ~40 → c2 ~53 →
-  c3 ~70 → **c4 ~80** (≈2× from c1), **KV usage only ~3% → headroom for c8+**. The earlier "weak c1→c2" read
+- **Single-stream: ~parity with Marlin (~50 peak).** **Concurrency: scales strongly, no wall** — c1 ~40 →
+  c2 ~53 → c3 ~70 → c4 ~80 → **c6 ~90 (peak 117)**, **KV only ~4% → headroom remains**. At high accept b12x c6
+  peak (117) ≈ Marlin's recalled c6 ~120; on mixed content Marlin's ~120 avg edges b12x's ~90. The earlier "weak c1→c2" read
   was a low-acceptance content window, NOT a wall. The ~3 GB swap at c1 was the one-time cold TileLang compile,
   not a steady-state ceiling (persistent cache now in the recipe should remove it on a warm boot).
 - **Only real structural downside vs Marlin: smaller KV pool** (443k vs 621k) — the heavier non-KV b12x
