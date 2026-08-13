@@ -20,7 +20,7 @@ GB10 (SM121), TP=2 over ConnectX. Same-schema companion: `recipes/deepseek-v4-fl
 | 2026-08-13 | 3 | mixed | ~65–72 (peak 82) | ~22–24 | 3.2–5.1 (~4.3) | 37–82% (~63%) | ~2% | healthy scaling; KV barely touched |
 | 2026-08-13 | 4 | mixed | ~78–82 (peak 99) | ~20 | 3.2–5.2 (~4.3) | 44–84% (~64%) | ~3% | scales cleanly, still climbing |
 | 2026-08-13 | 6 | mixed | ~85–95 (peak 117) | ~15 | 3.0–5.0 (~4.0) | 39–81% (~55%) | ~4% | still scaling; peak nears Marlin's recalled c6 ~120 |
-| 2026-08-13 | 8 | farm-SVG (same prompt) | ~80 (est) | ~10 (~40 ch/s) | — | — | — | boss-fish harness, 8× streaming; also the render QUALITY probe |
+| 2026-08-13 | 8 | farm-SVG mix | ~95–105 (peak 123) | ~12–13 | 3.2–5.0 (~4.1) | 44–79% (~60%) | ~5% | engine Avg-gen-tput (my earlier ~80 ch/s-est was low); scales to c8, no wall |
 
 ## Notes / verdict
 - **Throughput is dspark-acceptance-driven → content-dependent.** Single-stream swings ~33 (56% accept) → ~51
@@ -34,8 +34,8 @@ GB10 (SM121), TP=2 over ConnectX. Same-schema companion: `recipes/deepseek-v4-fl
   bouncing in place, no flying/floating/"0x0 teleport" (the old-DeepSeek failure). So the **fp4 MoE quant does
   NOT degrade 0731's render/reasoning quality** — the last open A/B axis, settled in b12x's favour.
 - **Single-stream: ~parity with Marlin (~50 peak).** **Concurrency: scales strongly, no wall** — c1 ~40 →
-  c2 ~53 → c3 ~70 → c4 ~80 → **c6 ~90 (peak 117)**, **KV only ~4% → headroom remains**. At high accept b12x c6
-  peak (117) ≈ Marlin's recalled c6 ~120; on mixed content Marlin's ~120 avg edges b12x's ~90. The earlier "weak c1→c2" read
+  c2 ~53 → c3 ~70 → c4 ~80 → c6 ~90 → **c8 ~100 (peak 123)**, **KV only ~5% → still no wall**. b12x's c8 peak
+  (123) sits right at Marlin's recalled c6 ~120; averages are close, content-driven (dspark accept). The earlier "weak c1→c2" read
   was a low-acceptance content window, NOT a wall. The ~3 GB swap at c1 was the one-time cold TileLang compile,
   not a steady-state ceiling (persistent cache now in the recipe should remove it on a warm boot).
 - **Only real structural downside vs Marlin: smaller KV pool** (443k vs 621k) — the heavier non-KV b12x
