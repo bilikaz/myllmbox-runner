@@ -78,12 +78,18 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv uv pip install packagi
 RUN git clone --recursive https://github.com/flashinfer-ai/flashinfer.git && \
     cd flashinfer && git checkout ${FLASHINFER_REF} && git submodule update --init --recursive
 WORKDIR /workspace/flashinfer
+# FlashInfer main (0.6.18) ships a `.python-version` pinning 3.10, so `uv build` would run under a bare managed
+# 3.10 with no filelock — and flashinfer-cubin's build backend imports flashinfer→jit→cubin_loader→filelock
+# ("ModuleNotFoundError: No module named 'filelock'"). Drop the pins and force the SYSTEM python 3.12 (which the
+# base stage populated with filelock/requests/tqdm). Wheels are py3-none-any, so the interpreter version is moot.
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     --mount=type=cache,id=ccache,target=/root/.ccache \
     sed -i -e 's/license = "Apache-2.0"/license = { text = "Apache-2.0" }/' -e '/license-files/d' pyproject.toml && \
-    uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v && \
-    cd flashinfer-cubin && uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v && \
-    cd ../flashinfer-jit-cache && uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v
+    rm -f .python-version flashinfer-cubin/.python-version flashinfer-jit-cache/.python-version && \
+    PY="$(command -v python3)" && \
+    uv build --no-build-isolation --python "$PY" --wheel . --out-dir=/workspace/wheels -v && \
+    cd flashinfer-cubin && uv build --no-build-isolation --python "$PY" --wheel . --out-dir=/workspace/wheels -v && \
+    cd ../flashinfer-jit-cache && uv build --no-build-isolation --python "$PY" --wheel . --out-dir=/workspace/wheels -v
 
 # ============================ STAGE 3: vLLM wheels (B12X fork) ============================
 FROM base AS vllm-builder
