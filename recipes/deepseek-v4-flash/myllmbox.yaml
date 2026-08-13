@@ -14,6 +14,11 @@
 server:
   image: mbx-deepseek-v4-flash
   model: /models/deepseek-ai/DeepSeek-V4-Flash-0731
+  # PERSISTENT KERNEL CACHE → /cache (mounted on BOTH nodes; each Spark keeps its own compiled kernels). The b12x
+  # mHC path compiles TileLang kernels (hc_head_fuse/mhc_post) + AOT graphs on a COLD boot — a ~31G UMA spike that
+  # recurs every launch and starves KV (the r0b0tlab TileLang saga: cold-compile OOM). Point the caches under this
+  # persistent /cache → compiled ONCE, reused every boot → no spike, faster boot, and headroom to raise util.
+  cache: recipes/deepseek-v4-flash/.data/cache
 
   env:
     # ---- B12X stack (the real speedup; must match the B12X image's expectations) ----
@@ -37,6 +42,11 @@ server:
     HF_HUB_DISABLE_XET: "1"
     TORCH_CUDA_ARCH_LIST: "12.1a"
     FLASHINFER_CUDA_ARCH_LIST: "12.1a"
+    # ---- persistent kernel/compile caches (point under the /cache mount above → compile storm is ONE-TIME) ----
+    VLLM_DISABLE_COMPILE_CACHE: "0"                  # cache ENABLED (pairs with the /cache mount)
+    VLLM_CACHE_ROOT: /cache/vllm-cache               # AOT torch.compile + vLLM artifacts (log showed /root/.cache/vllm)
+    FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
+    TILELANG_CACHE_DIR: /cache/tilelang              # THE big one — mHC TileLang kernels (else ~31G cold-compile/boot)
     # ---- RoCE NCCL over ConnectX (launcher sets IFNAME/HCA/DISABLE; these pin RoCE v2) ----
     NCCL_IB_GID_INDEX: "3"
     NCCL_IB_ROCE_VERSION_NUM: "2"
@@ -65,9 +75,9 @@ server:
     attention-backend: B12X_MLA_SPARSE
     load-format: instanttensor                   # B12X hybrid draft loader (built into the image)
     max-cudagraph-capture-size: 64
-    # NB: DS-V4 does NOT support torch.compile (log: "torch.compile is turned on, but the model ... does not
-    # support it") → the PIECEWISE/compile path is a no-op; FULL cudagraph capture + the b12x custom fusions
-    # (norm_quant, act_quant) carry it. Kept as upstream's validated value — the warning is harmless.
+    # NB: vLLM warns "torch.compile ... does not support it" for DS-V4, but AOT compile DOES run + cache
+    # (VLLM_USE_AOT_COMPILE=1; ~18s first boot) and BOTH PIECEWISE and FULL cudagraphs capture — the warning is
+    # cosmetic (model not on the official supported list). Kept as upstream's validated value.
     compilation-config: '{"cudagraph_mode":"FULL_AND_PIECEWISE","custom_ops":["all"]}'
     speculative-config: '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic","attention_backend":"B12X_MLA_SPARSE"}'
     # ---- DeepSeek-V4 parsers + thinking (house default ON) ----
