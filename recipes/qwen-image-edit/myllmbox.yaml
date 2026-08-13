@@ -1,0 +1,80 @@
+# Qwen-Image-Edit-2511 — image EDIT server on a single DGX Spark (GB10/SM121). Serves a PRE-QUANTIZED checkpoint.
+#
+# Ported from the old eugr recipe (x/qwen-image-edit-2511.yaml, on-the-fly quant) to our recipes/ structure
+# with a PRE-QUANT step — same model, same LoRA, same tuned params, but the NVFP4 quant is done ONCE offline
+# (like flux2-dev) so the serve boots instantly with no BF16 peak / no JIT stall.
+#
+# Two steps (both self-provisioning — no manual ./download.sh needed):
+#   1. ./quantize.sh qwen-image-edit    → downloads the BF16 base if missing, NVFP4-quants the transformer
+#                                         → models/myllmbox/Qwen-Image-Edit-2511-nvfp4
+#   2. ./run.sh qwen-image-edit         → auto-downloads the Lightning LoRA (extra_models), serves pre-quant + LoRA INSTANTLY
+#
+# GENERIC-server recipe (not vLLM): `command:`/uvicorn runs server.py's FastAPI OpenAI-Images app; the runner
+# injects NO vLLM flags and fronts it with the keepalive proxy + cloudflared tunnel (server.py also emits
+# keepalive whitespace so Cloudflare's ~100s idle timeout never fires on long edits). SOLO — one Spark; this
+# takes the media slot (swap in when the FLUX/LLM slot is free), it does NOT co-host with a TP LLM serve.
+#
+# EDIT-ONLY model: every request needs >=1 input image → POST /v1/images/edits (multipart). Non-Commercial weights.
+
+server:
+  image: mbx-qwen-image-edit                            # built from this recipe's Dockerfile (torchao serve stack)
+  model: /models/myllmbox/Qwen-Image-Edit-2511-nvfp4    # the PRE-QUANT (from ./quantize.sh)
+  uvicorn:                                              # GENERIC FastAPI server → uvicorn <app> --host --port
+    app: server:app                                     #   port = server.port (8000, same as vLLM → uniform proxy)
+    host: 0.0.0.0
+    port: 8000
+
+  env:
+    MODEL_PATH: /models/myllmbox/Qwen-Image-Edit-2511-nvfp4   # load the pre-quant directly
+    QUANT_PRELOADED: "1"                                      # → server.py loads it as-is (no on-the-fly quant, no BF16 peak)
+    SERVED_MODEL_NAME: Qwen/Qwen-Image-Edit-2511
+
+    # SPEED: 4-step Lightning distillation LoRA (lightx2v) → ~10x fewer steps, stacks with NVFP4 (~4x/step).
+    # Loaded UNFUSED over the quantized transformer (BF16 adapter — fusing into NVFP4 isn't supported). It is
+    # NOT baked into the pre-quant; it applies at serve time. REQUIRES the few-step + CFG-off config below.
+    # To run FULL-QUALITY 40-step instead: comment out LORA_PATH and set DEFAULT_STEPS 40 / DEFAULT_TRUE_CFG 4.0.
+    # The exact LoRA file. The lightx2v repo ships BOTH a 4-step and an 8-step weight, so name the one you want
+    # (4-step here, run at 4-8 steps — the 8-step showed no A/B advantage). server.py splits it into dir + file.
+    LORA_PATH: /models/lightx2v/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors
+    # Scheduler: "0" = model's stock FlowMatch (what all the verified-good results used); "1" swaps ModelTC's
+    # Lightning config (base/max shift ln(3)) — parity in A/B at working resolutions. Keeping stock as tested.
+    LIGHTNING_SCHEDULER: "0"
+
+    # COMPILE_BLOCKS=1: fastest steady-state, but each NEW image shape pays a one-time Triton JIT stall
+    # (~1-2 min). Set "0" for varied sizes / no stalls (~10-15% slower per image).
+    COMPILE_BLOCKS: "1"
+
+    # size=auto edit target area (px). EDIT RESOLUTION FLOOR: edits collapse to a neon-posterized identity
+    # copy when either output dim <= 1024; from ~1328² (Qwen native) up they're excellent. server.py size=auto
+    # targets EDIT_AUTO_PIXELS at input aspect. 2048²@8st ≈ 75-81s; 1328²@8st ≈ 21-27s. Pass size=input for raw.
+    EDIT_AUTO_PIXELS: "4194304"
+    DEFAULT_STEPS: "8"                                        # 4-step LoRA run at 4-8 (per-request override); 8 = more detail
+    DEFAULT_TRUE_CFG: "1.0"                                   # Lightning ⇒ CFG OFF (>1 doubles work AND fights distillation)
+    DEFAULT_GUIDANCE: "1.0"                                   # distilled guidance off
+    DEFAULT_NEGATIVE_PROMPT: " "
+    # MAX_N=1: GB10 gets NO batching speedup (48 SMs saturate at 2MP) and +36s/+9GB per extra image.
+    MAX_N: "1"
+    BATCH_PIXEL_BUDGET: "7000000"                             # batch memory guard (moot while MAX_N=1)
+
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+
+# extra_models: additional weights this recipe needs PRESENT beyond the main model. ./run.sh downloads any
+# missing ones (and rsyncs them to workers on a cluster) exactly like the main model — no manual ./download.sh.
+# Generic by design: a LoRA here, but the same field carries an extra text-encoder / VAE / refiner for other
+# recipes (e.g. holo-3's 32B text encoder). USAGE is via the server env above (LORA_PATH → this path); this
+# block is purely PROVISIONING. NOT quantized (an extra_model that needs quantizing is its own recipe).
+extra_models:
+  - lightx2v/Qwen-Image-Edit-2511-Lightning     # → /models/lightx2v/... (LORA_PATH); the 4-step Lightning LoRA
+
+# ./quantize.sh reads this: how to produce the pre-quant above from the BF16 source (shared mbx-quantizer image).
+quantize:
+  source: /models/Qwen/Qwen-Image-Edit-2511             # BF16 base → ./download.sh Qwen/Qwen-Image-Edit-2511
+  model_type: diffusion                                 # diffusers pipeline (QwenImageEditPlusPipeline, auto-detected)
+  target: transformer                                   # quantize the MMDiT denoiser; keep VAE/text-encoder BF16
+  # keep accuracy-critical linears in BF16, NVFP4 the rest. VERIFIED clean on the old on-the-fly recipe.
+  # ⚠ re-verify names vs QwenImageTransformer2DModel.named_modules() if a diffusers bump renames them.
+  skip_modules: "img_in,txt_in,time_text_embed,norm_out,proj_out"
+  format: nvfp4                                         # default (~4x on GB10; ~10-12GB transformer vs ~40GB BF16)
+  formats: [nvfp4, mxfp8]                               # what this model supports (quantize.sh rejects others)
