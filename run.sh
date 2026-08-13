@@ -37,7 +37,10 @@ fi
 #    UNCHANGED, tracked by hashing the context into an image label (mbx.ctx_sha) — a Dockerfile/server.py edit
 #    changes the hash → rebuild (no stale-image footgun). REBUILD=1 forces a rebuild.
 if [ -f "$D/Dockerfile" ]; then
-  CTX_HASH="$(find "$D" -type f -not -path '*/.data/*' | sort | xargs sha256sum 2>/dev/null | sha256sum | cut -c1-16)"
+  # hash only BUILD-relevant files (Dockerfile, server.py, patches, …). Exclude myllmbox.yaml (runtime flags,
+  # read at launch — not baked into the image) and *.md/.data so a recipe-config or doc edit never forces a
+  # needless image rebuild; a Dockerfile/server.py edit still does.
+  CTX_HASH="$(find "$D" -type f -not -path '*/.data/*' -not -name 'myllmbox.yaml' -not -name '*.md' | sort | xargs sha256sum 2>/dev/null | sha256sum | cut -c1-16)"
   HAVE_HASH="$(docker image inspect -f '{{ index .Config.Labels "mbx.ctx_sha" }}' "mbx-$R" 2>/dev/null || true)"
   if [ "${REBUILD:-}" != 1 ] && [ -n "$CTX_HASH" ] && [ "$HAVE_HASH" = "$CTX_HASH" ]; then
     echo "· image mbx-$R present + recipe unchanged (ctx $CTX_HASH) — skip build (REBUILD=1 to force)"

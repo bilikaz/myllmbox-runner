@@ -51,7 +51,9 @@ server:
     trust-remote-code: true
     pipeline-parallel-size: 1
     distributed-executor-backend: mp             # dual-node = mp (no Ray); TP set by the launcher
-    kv-cache-dtype: fp8                          # B12X_MLA_SPARSE wants plain fp8 (not fp8_ds_mla)
+    kv-cache-dtype: fp8_ds_mla                   # DS-V4 sparse MLA's native packed KV. The b12x fork resolves a
+                                                 # plain 'fp8' to THIS at runtime anyway (log: "Using DeepSeek's
+                                                 # fp8_ds_mla KV cache format") — eugr's recipe left the generic fp8.
     block-size: 256
     max-model-len: 300000                        # 1M-monster capped at 300k per policy
     max-num-seqs: 8
@@ -63,6 +65,9 @@ server:
     attention-backend: B12X_MLA_SPARSE
     load-format: instanttensor                   # B12X hybrid draft loader (built into the image)
     max-cudagraph-capture-size: 64
+    # NB: DS-V4 does NOT support torch.compile (log: "torch.compile is turned on, but the model ... does not
+    # support it") → the PIECEWISE/compile path is a no-op; FULL cudagraph capture + the b12x custom fusions
+    # (norm_quant, act_quant) carry it. Kept as upstream's validated value — the warning is harmless.
     compilation-config: '{"cudagraph_mode":"FULL_AND_PIECEWISE","custom_ops":["all"]}'
     speculative-config: '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic","attention_backend":"B12X_MLA_SPARSE"}'
     # ---- DeepSeek-V4 parsers + thinking (house default ON) ----
