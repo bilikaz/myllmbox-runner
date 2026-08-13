@@ -31,10 +31,20 @@ if ! docker image inspect mbx-base:latest >/dev/null 2>&1; then
   docker build -t mbx-base:latest -f Dockerfile .
 fi
 
-# 3. build THIS recipe on top of the base (recipes/<recipe>/Dockerfile → mbx-<recipe>)
+# 3. build THIS recipe → mbx-<recipe>. docker's layer cache makes an unchanged rebuild a ~2s no-op — BUT if
+#    the build cache is pruned/evicted, an unconditional `docker build` re-does the full (here ~1h) compile even
+#    though the image is fine. So SKIP the build when the image EXISTS and the recipe's build context is
+#    UNCHANGED, tracked by hashing the context into an image label (mbx.ctx_sha) — a Dockerfile/server.py edit
+#    changes the hash → rebuild (no stale-image footgun). REBUILD=1 forces a rebuild.
 if [ -f "$D/Dockerfile" ]; then
-  echo "· building recipes/$R  →  mbx-$R"
-  docker build -t "mbx-$R" "$D"
+  CTX_HASH="$(find "$D" -type f -not -path '*/.data/*' | sort | xargs sha256sum 2>/dev/null | sha256sum | cut -c1-16)"
+  HAVE_HASH="$(docker image inspect -f '{{ index .Config.Labels "mbx.ctx_sha" }}' "mbx-$R" 2>/dev/null || true)"
+  if [ "${REBUILD:-}" != 1 ] && [ -n "$CTX_HASH" ] && [ "$HAVE_HASH" = "$CTX_HASH" ]; then
+    echo "· image mbx-$R present + recipe unchanged (ctx $CTX_HASH) — skip build (REBUILD=1 to force)"
+  else
+    echo "· building recipes/$R  →  mbx-$R"
+    docker build -t "mbx-$R" --label "mbx.ctx_sha=$CTX_HASH" "$D"
+  fi
 fi
 
 # 3b. resolve the model — the pipeline is automatic:  have it? serve. missing myllmbox/ quant? quantize it
