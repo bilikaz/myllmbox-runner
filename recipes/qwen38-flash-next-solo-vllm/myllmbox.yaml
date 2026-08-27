@@ -39,6 +39,10 @@ server:
     distributed-executor-backend: mp            # REQUIRED — see header (PLE worker spawn gap on uniproc)
     kv-cache-memory: "32212254720"              # 30 GiB pin (user's call; vLLM offered 32.09 max) ≈ 1.24M tokens
     max-model-len: 262144
+    kv-cache-dtype: fp8                         # house default — halves KV bytes/token (the QSA/full-attn layers;
+                                                # GDN layers keep SSM state, unaffected). ~2× KV pool for free.
+                                                # vLLM's kernels ≠ the sglang CuTe path that asserted on fp8 K;
+                                                # if warmup/first requests break, drop this line (2-min bounce).
     max-num-seqs: 6
     max-num-batched-tokens: 16384               # VLM ≥16k house rule
     enable-prefix-caching: true
