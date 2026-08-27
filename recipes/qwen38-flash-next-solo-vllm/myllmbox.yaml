@@ -1,0 +1,45 @@
+# Qwen3.8-Flash-Next — SINGLE Spark via vLLM, Inferact NVFP4, PLE-from-disk. THE PROVEN CONFIG
+# (2026-08-27, first fully-healthy serve of this model here): 16.3 tok/s single-stream spec-off,
+# 1500-token thinking generations with zero corruption, ~924k-1.24M-token KV pool on ONE box.
+# vLLM ships working SM121 kernels for this model (own QSA triton kernels — no community patch needed);
+# our Dockerfile adds ONE patch: the PLE table is served from an (unlinked) NVMe file in the CPU offload
+# worker instead of resident RAM (MBX_PLE_MMAP=1) — without it 95G of table + 73G of weights can't share
+# a 119G box. NOTE --distributed-executor-backend mp is LOAD-BEARING: the PLE offload worker is only
+# spawned on the multiproc executor path; uniproc (TP1 default) never spawns it and the first request
+# busy-hangs forever (upstream gap, measured).
+#
+# MTP spec decode: vLLM has a dedicated Qwen3_8FlashNextMTP draft impl that LOADS Inferact's nvfp4 MTP
+# head (sglang can't) — being validated on box2; add when proven:
+#   speculative-config: '{"method":"mtp","num_speculative_tokens":3}'
+
+server:
+  image: mbx-qwen38-flash-next-solo-vllm        # built from THIS folder's Dockerfile (keep in sync with
+                                                # recipes/qwen38-flash-next/Dockerfile — same content)
+  entrypoint: vllm
+  model: /models/Inferact/Qwen3.8-Flash-Next-NVFP4
+  cache: recipes/qwen38-flash-next-solo-vllm/.data/cache   # /cache: torch-compile + triton caches + the PLE backing file
+
+  env:
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    HF_HUB_DISABLE_XET: "1"
+    VLLM_PLE_CPU_OFFLOAD: "1"                   # table → CPU offload worker (single-node only upstream)
+    MBX_PLE_MMAP: "1"                           # …and from there to NVMe via our patch. Never disable (house rule).
+    TORCH_CUDA_ARCH_LIST: "12.1a"
+    FLASHINFER_CUDA_ARCH_LIST: "12.1a"
+
+  vllm:
+    served-model-name: Qwen/Qwen3.8-Flash-Next
+    tensor-parallel-size: 1
+    distributed-executor-backend: mp            # REQUIRED — see header (PLE worker spawn gap on uniproc)
+    kv-cache-memory: "32212254720"              # 30 GiB pin (user's call; vLLM offered 32.09 max) ≈ 1.24M tokens
+    max-model-len: 262144
+    max-num-seqs: 6
+    max-num-batched-tokens: 16384               # VLM ≥16k house rule
+    enable-prefix-caching: true
+    no-enable-flashinfer-autotune: true
+    enable-auto-tool-choice: true
+    tool-call-parser: qwen3_xml                 # per the updated official recipe page (was qwen3_coder)
+    reasoning-parser: qwen3
+
+dashboard: sparkdash
