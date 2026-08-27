@@ -32,6 +32,11 @@ server:
                                                 # rm .data/cache/ple-mmap/* to reset.
     TORCH_CUDA_ARCH_LIST: "12.1a"
     FLASHINFER_CUDA_ARCH_LIST: "12.1a"
+    OMP_NUM_THREADS: "4"                        # vLLM cuts serving procs to 1 torch thread ("Reducing Torch
+                                                # threads from 20 to 1 ... Set OMP_NUM_THREADS to override").
+                                                # The CPU-side PLE worker does K+1 gathers per MTP verify step —
+                                                # single-threaded that serializes inside the spec cycle. 4 of the
+                                                # 20 Grace cores for it; raise if gathers still show as the drag.
 
   vllm:
     served-model-name: Qwen/Qwen3.8-Flash-Next
