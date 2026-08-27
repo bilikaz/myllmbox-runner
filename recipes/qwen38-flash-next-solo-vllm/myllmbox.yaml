@@ -8,9 +8,10 @@
 # spawned on the multiproc executor path; uniproc (TP1 default) never spawns it and the first request
 # busy-hangs forever (upstream gap, measured).
 #
-# MTP spec decode: vLLM has a dedicated Qwen3_8FlashNextMTP draft impl that LOADS Inferact's nvfp4 MTP
-# head (sglang can't) — being validated on box2; add when proven:
-#   speculative-config: '{"method":"mtp","num_speculative_tokens":3}'
+# MTP spec decode: PROVEN 2026-08-27 on box2 — vLLM's dedicated Qwen3_8FlashNextMTP draft impl loads
+# Inferact's nvfp4 MTP head (sglang can't) and ACCEPTS: draft acceptance 63-64.5%, mean accept length
+# 2.9/4, per-position 0.74/0.63/0.52 → 22.0 tok/s vs 16.3 spec-off (+35%), clean 1500-token thinking
+# generations. Tuning headroom: K=2 may trade a little accept length for less draft overhead.
 
 server:
   image: mbx-qwen38-flash-next-solo-vllm        # built from THIS folder's Dockerfile (keep in sync with
@@ -41,5 +42,6 @@ server:
     enable-auto-tool-choice: true
     tool-call-parser: qwen3_xml                 # per the updated official recipe page (was qwen3_coder)
     reasoning-parser: qwen3
+    speculative-config: '{"method":"mtp","num_speculative_tokens":3}'   # see MTP note in header — proven
 
 dashboard: sparkdash

@@ -25,8 +25,11 @@ V=.venv
 [ -x "$V/bin/python" ] || python3 -m venv "$V"
 "$V/bin/python" -m pip install -q -U pip aiohttp pyyaml click python-dotenv >/dev/null
 
-# 2. build the base box once (root Dockerfile → mbx-base). Every recipe FROMs it — built once, shared.
-if ! docker image inspect mbx-base:latest >/dev/null 2>&1; then
+# 2. build the base box once (root Dockerfile → mbx-base) — but ONLY if THIS recipe's Dockerfile actually
+#    FROMs it (same gate as build-and-copy.sh). Recipes based on upstream images (vllm/sglang tags) don't
+#    need a ~10GB mbx-base pull on a fresh box.
+if [ -f "$D/Dockerfile" ] && grep -qiE '^[[:space:]]*FROM[[:space:]]+mbx-base' "$D/Dockerfile" \
+   && ! docker image inspect mbx-base:latest >/dev/null 2>&1; then
   echo "· building base box (./Dockerfile)  →  mbx-base"
   docker build -t mbx-base:latest -f Dockerfile .
 fi
