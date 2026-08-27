@@ -1,0 +1,78 @@
+# Qwen3.8-Flash-Next-FP8 — 176B-A6B hybrid GDN+QSA+mHC multimodal MoE on 2× DGX Spark (GB10/SM121).
+# UPSTREAM: recipes.vllm.ai/Qwen/Qwen3.8-Flash-Next — model support lives ONLY in the dedicated image
+# `vllm/vllm-openai:qwen38-flash-next` (vLLM 0.28.0+ base; "PyPI installation is not supported"). The
+# tag is multi-arch and its arm64 image IS the cu130 build → right CUDA for DGX OS. Pinned by digest
+# below (tag was still moving as of 2026-08-26) — a REFERENCE image per house rule, not our own build.
+# SM121 is NOT on their validated list (GB300/H200/MI355X) — first boot is the experiment.
+#
+# DUAL-NODE: FP8 checkpoint is 172.8 GiB → ~87 GiB/node at TP=2. That's TIGHT against the ~99G/node
+# budget (0.83 × 119G UMA): expect the first fight to be memory, not kernels. Fallbacks, in order:
+#   1. shrink max-model-len (262144 native → 131072 → 65536);
+#   2. VLLM_PLE_CPU_OFFLOAD=1 (see env note below — on UMA it frees vLLM's GPU budget, not physical RAM,
+#      so LOWER gpu-memory-utilization by roughly the offloaded share when enabling it);
+#   3. the RadixArk NVFP4 checkpoint (135 GB → ~68G/node, MTP kept BF16) — comfortable, but its W4A4
+#      flashinfer_cutlass backend likely won't dispatch on SM121 → expect Marlin weight-only there.
+
+server:
+  image: vllm/vllm-openai:qwen38-flash-next   # pinned @sha256:fc120ece0a388cc0aa1caad4a9f1cd92113484ab7ec2fd0efadd62585be05bf8 (manifest list; arm64/cu130 image = sha256:3b0e188ffceb…, pushed 2026-08-26)
+  entrypoint: vllm                            # drive `vllm serve` ourselves under our runner (cluster launch + proxy + tunnel)
+  model: /models/Qwen/Qwen3.8-Flash-Next-FP8
+  # PERSISTENT KERNEL CACHE → /cache on both nodes. This arch has mHC (hyper_connection tensors) — the
+  # DS-V4 lesson: cold kernel compiles inside an ephemeral container repeat EVERY boot and can OOM the
+  # UMA pool. Cheap insurance even if this image never invokes TileLang: triton/flashinfer/vLLM
+  # artifacts all land under the mount and survive container recreation.
+  cache: recipes/qwen38-flash-next/.data/cache
+
+  env:
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    HF_HUB_DISABLE_XET: "1"
+    # kernel/artifact caches → the persistent /cache mount (see above)
+    VLLM_CACHE_ROOT: /cache/vllm-cache
+    FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
+    TRITON_CACHE_DIR: /cache/triton
+    TILELANG_CACHE_DIR: /cache/tilelang         # harmless if unused; saves a boot-storm if mHC brings TileLang
+    TORCH_CUDA_ARCH_LIST: "12.1a"               # any JIT in the stock image should target SM121, not GB300's arch
+    FLASHINFER_CUDA_ARCH_LIST: "12.1a"
+    VLLM_PLE_CPU_OFFLOAD: "1"
+    # NCCL over RoCE/ConnectX — the proven set from our DS-V4 recipes on THIS cluster. The runner pins
+    # NCCL_IB_HCA / NCCL_SOCKET_IFNAME / GLOO_SOCKET_IFNAME / VLLM_HOST_IP per box from cluster.yaml.
+    NCCL_IB_GID_INDEX: "3"
+    NCCL_IB_ROCE_VERSION_NUM: "2"
+    NCCL_IB_ADDR_FAMILY: "AF_INET"
+    NCCL_CROSS_NIC: "1"
+    NCCL_IGNORE_CPU_AFFINITY: "1"
+    NCCL_NVLS_ENABLE: "0"
+
+  vllm:
+    served-model-name: Qwen/Qwen3.8-Flash-Next  # clients don't care which quant is behind it (same name if we A/B NVFP4)
+    pipeline-parallel-size: 1                   # upstream: PP unsupported on this model — TP/TEP only
+    distributed-executor-backend: mp            # dual-node = mp (no Ray); TP=2 set by the launcher from cluster.boxes
+    gpu-memory-utilization: 0.84                # cold-boot value; 0.83 is the UMA ceiling (house rule) once load is proven
+    max-model-len: 262144                       # native window, maxed per policy (only 1M-monsters get capped; YaRN-to-1M not worth it here)
+    max-num-seqs: 16                            # upstream uses 256 on GB300 — our KV budget is the constraint, raise after fit is proven
+    max-num-batched-tokens: 16384               # VLM! ≥16k or image tokens can exceed the encoder budget → silent wedge (house scar)
+    kv-cache-dtype: fp8                         # fp8 KV for size (house preference; weights are fp8 too) — e4m3 on CUDA
+    # FP8 checkpoint is BLOCK-wise fp8 (weight_block_size 128×128) — the same kernel family that walled
+    # DS-V4 on SM121 (DeepGEMM=SM100, cutlass fp8 fails to dispatch on GB10). Upstream itself says plain
+    # TP is incompatible with this checkpoint on H200 and requires TEP + triton MoE — and triton is also
+    # our best SM121 bet, so we start exactly there:
+    enable-expert-parallel: true
+    moe-backend: triton
+    no-enable-flashinfer-autotune: true         # in every upstream NVIDIA command — effectively mandatory
+    enable-prefix-caching: true
+    enable-auto-tool-choice: true
+    tool-call-parser: qwen3_coder               # upstream's parsers
+    reasoning-parser: qwen3
+    # MTP spec decode (1 draft layer, shipped in the checkpoint). Upstream default K=3, "reduce below 3
+    # if memory pressure" — with our tight fit, drop to 2/1 (or comment out) before touching anything else.
+    # speculative-config: '{"method":"mtp","num_speculative_tokens":3}'   # OFF per test plan (vllm without mtp first)
+    default-chat-template-kwargs: '{"enable_thinking":true}'   # thinking ON by default (house preference; kwarg name verified in chat_template.jinja)
+    # sampling: model SHIPS real defaults (temp 1.0 / top_k 20 / top_p 0.95 in generation_config.json) →
+    # no override needed. House rule still applies client-side: no penalties, never temperature:0.
+
+cluster:                                        # TP=2 across both Sparks over the ConnectX link
+  boxes: [box1, box2]                           # names from cluster.yaml — no IPs here, recipe stays portable
+  master_port: 25000
+
+dashboard: sparkdash                            # proxy fronts it on non-/v1 paths, gated by DASHBOARD_PASSWORD (.env)

@@ -75,7 +75,17 @@ def run_args(cfg: dict[str, Any], node_rank: int = 0, nnodes: int = 1, master_ad
                        ("NCCL_IB_HCA", hca),
                        ("NCCL_IB_DISABLE", "0"),
                        ("GLOO_SOCKET_IFNAME", iface),                 # gloo on the same interconnect iface as NCCL
-                       ("VLLM_HOST_IP", node_ip)):                    # advertise THIS node's interconnect IP for the mq
+                       ("VLLM_HOST_IP", node_ip),                     # advertise THIS node's interconnect IP for the mq
+                       ("SGLANG_HOST_IP", node_ip),                   # sglang's equivalent (utils/network.py get_ip) — without it the
+                                                                      # shm_broadcast mq advertises the default-route (management-LAN)
+                                                                      # IP whose ports are blocked → wait_until_ready hangs forever
+                       # engine-agnostic cluster facts, for generic-command recipes (a wrapped engine — sglang
+                       # etc. — needs its own --nnodes/--node-rank/--dist-init-addr; vLLM gets them as CLI flags
+                       # below, a server.command can read these instead: `bash -c '... --node-rank $MBX_NODE_RANK'`)
+                       ("MBX_NNODES", str(nnodes)),
+                       ("MBX_NODE_RANK", str(node_rank)),
+                       ("MBX_MASTER_ADDR", str(master_addr)),
+                       ("MBX_MASTER_PORT", str(c.get("master_port", 25000)))):
             if val:
                 args += ["-e", f"{k}={val}"]
     if str(v["model"]).startswith("/"):
@@ -92,6 +102,28 @@ def run_args(cfg: dict[str, Any], node_rank: int = 0, nnodes: int = 1, master_ad
             args += ["--entrypoint", ep]
         args += [v["image"]]
         args += shlex.split(cmd) if isinstance(cmd, str) else [str(c) for c in cmd]
+        return args
+    # SGLANG mode (a non-empty server.sglang dict): same box contract as vLLM mode — model from server.model,
+    # API on server.port, TP = node count on a cluster — but the engine is sglang. Flags map like server.vllm.
+    sg = v.get("sglang")
+    if isinstance(sg, dict) and sg:
+        launcher = ["python3", "-m", "sglang.launch_server"]
+        if ep:
+            args += ["--entrypoint", ep]
+            if ep in ("python", "python3"):   # entrypoint already IS the interpreter — don't double it
+                launcher = ["-m", "sglang.launch_server"]
+        args += [v["image"], *launcher, "--model-path", v["model"],
+                 "--host", "0.0.0.0", "--port", str(v["port"])]   # 0.0.0.0: the -p 127.0.0.1 map needs it (sglang defaults to 127.0.0.1)
+        if multi:  # sglang's native multi-node: every rank runs the same launcher, rank 0 serves the API
+            args += ["--dist-init-addr", f"{master_addr}:{c.get('master_port', 25000)}",
+                     "--nnodes", str(nnodes), "--node-rank", str(node_rank)]
+            if not any(k in sg for k in ("tp", "tp-size", "tensor-parallel-size")):
+                args += ["--tp", str(nnodes)]   # Sparks are 1 GPU each → TP = node count (same rule as vLLM mode)
+        for k, val in sg.items():
+            if val is True:
+                args += [f"--{k}"]
+            elif val not in (False, None):
+                args += [f"--{k}", str(val)]
         return args
     if ep:
         args += ["--entrypoint", ep]   # override the image's default (e.g. a bootstrap) → run vllm ourselves

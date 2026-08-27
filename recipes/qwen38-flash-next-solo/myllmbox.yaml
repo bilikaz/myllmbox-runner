@@ -1,0 +1,49 @@
+# Qwen3.8-Flash-Next — SINGLE Spark (box1), Inferact NVFP4 + PLE-from-disk. Solo variant of
+# recipes/qwen38-flash-next-sglang (see its README.md for the full experiment log): main weights are only
+# 73.3 GiB total (measured) and the 95.4 GiB bf16 n-gram table pages from NVMe, so ONE box holds it —
+# no cluster block → no cross-node NCCL per token (the prime suspect for the dual-node ~12 tok/s floor;
+# single-Spark llama.cpp does 22-27). Frees box2 entirely. NEXTN stays off (sglang can't load Inferact's
+# nvfp4 MTP experts — see the dual recipe). Uses the SAME patched image + same warm kernel cache.
+
+server:
+  image: mbx-qwen38-flash-next-sglang           # built by the dual recipe (QSA SM121 patch + PLE mmap patch)
+  model: /models/Inferact/Qwen3.8-Flash-Next-NVFP4
+  cache: recipes/qwen38-flash-next-sglang/.data/cache   # shared with the dual recipe → kernels already warm
+
+  env:
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    HF_HUB_DISABLE_XET: "1"
+    TRITON_CACHE_DIR: /cache/triton
+    FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
+    TILELANG_CACHE_DIR: /cache/tilelang
+    TORCH_CUDA_ARCH_LIST: "12.1a"
+    FLASHINFER_CUDA_ARCH_LIST: "12.1a"
+    MBX_PLE_MMAP: "1"                           # PLE from disk — never disable (house rule)
+
+  sglang:
+    served-model-name: Qwen/Qwen3.8-Flash-Next
+    ple-offload-embedding: true                 # REQUIRED for the disk-PLE: the mmap patch lives inside the
+                                                # offload wrapper. Missing it = 95G table loads into the GPU
+                                                # pool = OOM SIGKILL at init (measured twice, 2026-08-27).
+    quantization: modelopt_fp4
+    fp4-gemm-backend: flashinfer_cutlass
+    context-length: 262144
+    # 0.89×122.5 ≈ 109G pool − ~74G weights → ~35G KV+mamba on one box (PLE on NVMe):
+    mem-fraction-static: 0.89
+    # no ep (single GPU); tp defaults to 1
+    chunked-prefill-size: 16384                 # VLM ≥16k house rule
+    mamba-ssm-dtype: bfloat16
+    # kv-cache-dtype: fp8_e4m3   # house pref, but UNTESTED with the Triton QSA kernel (the CuTe fallback
+    #                            # asserted on fp8 K). First light = bf16 (proven dual config); A/B fp8 after.
+    disable-radix-cache: true
+    # the mamba pool fix (see dual recipe README — starved pool = crashes/corruption):
+    max-mamba-cache-size: 97
+    mamba-scheduler-strategy: extra_buffer
+    mamba-track-interval: 64
+    max-running-requests: 6
+    sampling-backend: pytorch
+    disable-cuda-graph-padding: true
+    reasoning-parser: auto
+
+dashboard: sparkdash

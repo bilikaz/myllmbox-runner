@@ -28,6 +28,11 @@ DEFAULTS: dict[str, Any] = {
         # because they ARE vLLM params (gpu-memory-utilization, tensor-parallel-size, kv-cache-dtype, …) —
         # only read in vLLM mode (no `command`). Generic servers use `command`/`uvicorn` instead.
         "vllm": {},
+        # SGLang-mode CLI flags (same name: value → --name value mapping). A non-empty dict SELECTS SGLang
+        # mode: the runner launches `python3 -m sglang.launch_server --model-path <model> --port <port>`
+        # (+ --dist-init-addr/--nnodes/--node-rank/--tp on a cluster) instead of `vllm serve`. Put SGLang's
+        # own params here (mem-fraction-static, context-length, quantization, …). Ignored if `command` is set.
+        "sglang": {},
         "env": {},
         "runtime": "",
         "devices": "all",

@@ -1,0 +1,130 @@
+# Qwen3.8-Flash-Next-FP8 via SGLang — 176B-A6B hybrid GDN+QSA+mHC multimodal MoE on 2× DGX Spark.
+# SGLang-on-Spark is PROVEN for this model: @aijoey ran 2× Spark + SGLang (RadixArk NVFP4, 262K) on
+# 2026-08-26. Upstream recipe: docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.8-Flash-Next —
+# model support lives in the dedicated image below (branch qwen4-main), NOT in sglang releases (0.5.9
+# community Spark images are too old for this model). First SGLang recipe in this repo — it drives the
+# runner's `server.sglang:` mode (flags dict → `python3 -m sglang.launch_server`, cluster rank flags
+# injected per node; proxy+tunnel front identical to vLLM recipes).
+#
+# SAME FP8 checkpoint as the vLLM twin (recipes/qwen38-flash-next) → a clean ENGINE A/B: same weights,
+# same served name, sglang vs vLLM. FP8 is 172.8 GiB → ~87 G/node at TP=2 — TIGHT on the 119G UMA pool;
+# KV gets what's left (~13G at 0.84), softened by the hybrid arch (GDN layers keep SSM state, not KV)
+# + fp8 KV. If it doesn't fit: shrink context-length first; the RadixArk NVFP4 (135 GB, MTP kept BF16)
+# is the roomy fallback — swap model: and add `quantization: modelopt_fp4` + `fp4-gemm-backend:
+# flashinfer_cutlass` (RadixArk's card flags; aijoey proved that combo on 2× Spark too).
+
+server:
+  # our SM121-patched build (Dockerfile here): stock lmsysorg/sglang:qwen38flashnext (digest-pinned in the
+  # Dockerfile) + MiaAI's Triton QSA fallback. Stock image dies at QSA on GB10 — measured (CuTe q/k dtype
+  # assert with fp8 KV; MLIR layout-congruence otherwise). Build ships with ./build-and-copy.sh <name>.
+  image: mbx-qwen38-flash-next-sglang
+  # Inferact NVFP4 (the vLLM-official quant, 171G original layout): NVFP4 MoE experts + BF16 PLE ("real
+  # ngram") + MTP head (dense bf16, experts nvfp4). With the disk-PLE patch the ~102G bf16 table stays on
+  # NVMe → in-RAM ~35G/node. Testing vs FP8: NVFP4 decode ≈ 2× (bandwidth) + does its MTP head ACCEPT
+  # (FP8's head flatlined at accept rate 0.00 → spec useless)?
+  model: /models/Inferact/Qwen3.8-Flash-Next-NVFP4   # run.sh rsyncs to box2 automatically
+  # persistent kernel/artifact cache on both nodes (mHC arch — the DS-V4 cold-compile-storm lesson):
+  cache: recipes/qwen38-flash-next-sglang/.data/cache
+
+  env:
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    HF_HUB_DISABLE_XET: "1"
+    TRITON_CACHE_DIR: /cache/triton
+    FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
+    TILELANG_CACHE_DIR: /cache/tilelang         # harmless if unused; saves a boot-storm if mHC brings TileLang
+    TORCH_CUDA_ARCH_LIST: "12.1a"               # any JIT should target SM121, not the GB300 the image was tuned for
+    FLASHINFER_CUDA_ARCH_LIST: "12.1a"
+    # PLE FROM DISK (our image patch, see Dockerfile): with ple-offload-embedding on, the ~24G/node n-gram
+    # table is NOT copied into RAM — the offload wrapper adopts the safetensors mmap view, rows page in
+    # from NVMe on first gather (GB10 coherent page tables make the host mmap GPU-readable). Look for
+    # "MBX_PLE_MMAP: adopted mmap-backed PLE shard" in the boot log to confirm it engaged; on any layout
+    # surprise it falls back to the stock pinned copy with a warning.
+    MBX_PLE_MMAP: "1"
+    # NCCL over RoCE/ConnectX — the proven set from our DS-V4 recipes on THIS cluster. The runner pins
+    # NCCL_IB_HCA / NCCL_SOCKET_IFNAME / GLOO_SOCKET_IFNAME per box from cluster.yaml.
+    NCCL_IB_GID_INDEX: "3"
+    NCCL_IB_ROCE_VERSION_NUM: "2"
+    NCCL_IB_ADDR_FAMILY: "AF_INET"
+    NCCL_CROSS_NIC: "1"
+    NCCL_IGNORE_CPU_AFFINITY: "1"
+    NCCL_NVLS_ENABLE: "0"
+
+  sglang:                                       # SGLang mode — these map 1:1 to launch_server flags
+    served-model-name: Qwen/Qwen3.8-Flash-Next  # same name as the vLLM/FP8 twin → one client config, clean A/B
+    # NVFP4 via ModelOpt — tonyd2wild's proven pair on 2× Spark (his launcher, verbatim):
+    quantization: modelopt_fp4
+    fp4-gemm-backend: flashinfer_cutlass
+    context-length: 262144                      # native window, maxed per policy
+    # NO ple-offload-embedding: MEASURED (boot @0.70 + offload) that on UMA it's a budget NO-OP — the pinned
+    # host table comes from the SAME physical pool torch.cuda.mem_get_info sees, so the KV configurator still
+    # counted ~87G used ("minimum viable = 0.853") and offload only added gather overhead. (Our local
+    # config.json carries ple_embedding_dtype="float8_e4m3fn" — harmless, and required if offload is ever
+    # re-enabled.) The REAL ~24G/node win is the future NVMe-mmap PLE patch (0xBakeer: 1-3 page faults/tok).
+    # 0.89: measured min viable ≈0.86; 0.89×122.5 ≈ 109G pool vs ~87G weights(+2.5G MTP draft) → ~20G for
+    # KV+mamba. Proven to pass all pool checks on CLEAN memory (verify free -g ~100G before relaunch!).
+    mem-fraction-static: 0.89
+    # ---- the cookbook's VERIFIED low-latency command (FP8/H200 single-node), adapted to 2-node ----
+    ep: 2                                        # cookbook pairs ep with tp (theirs: --tp 4 --ep 4); tp=2 auto-injected
+    chunked-prefill-size: 16384                  # VLM: ≥16k so image/video token bursts fit one prefill chunk
+                                                 # (house scar: mm tokens > budget = silent wedge). CAVEAT the other
+                                                 # way (MiaAI): QSA indexer prefill workspace scales chunk×history
+                                                 # fp32 — they ran 1024 on Spark to cap an ~8-10G transient. If we
+                                                 # see prefill-time OOM/stalls at long history, THIS is the suspect.
+    # the hybrid layers: GDN/linear-attention kernels pinned to flashinfer, SSM state in bf16 (cookbook):
+    # GDN linear-attention: ALL-TRITON (sglang's default — no backend overrides), the config both working
+    # Spark recipes run. History (all MEASURED 2026-08-27, don't relearn): the cookbook's flashinfer GDN
+    # flags are H200-tuned and broken here — flashinfer SM120 prefill demands fp32 state, flashinfer decode
+    # validation demands bf16 (mutually exclusive), and MIXED kernels (flashinfer decode + triton verify)
+    # corrupted the shared SSM state under NEXTN → the token-0 "!" flood ~50 gen-tokens in (spec rollback
+    # snapshots inconsistent across implementations — the known hybrid-GDN spec-decode bug class, see
+    # sglang #25587/#23330, vllm #39273). Uniform triton kernels + NEXTN = tonyd2wild's ~70 tok/s config.
+    mamba-ssm-dtype: bfloat16                    # fp32 tested 2026-08-27: did NOT fix the depth-crash (pool bug did) → Tony-proven bf16
+    # ---- THE MAMBA STATE POOL FIX (tonyd2wild INCIDENT-2026-08-27, reproduced exactly here) ----
+    # With disable-radix-cache, sglang auto-sizes the mamba/SSM state pool to max-running-requests (we
+    # measured "max_mamba_cache_size: 6"). States are consumed by: 1 active per request + tracked
+    # checkpoints every mamba-track-interval tokens + ~4 speculative states per request with NEXTN.
+    # Pool exhaustion corrupts the linear-attention state → token-0 "!" floods (spec, ~50 tokens) and
+    # inf/nan sampler device-asserts (long generations, ~1300 tokens). ONE bug, all our symptoms.
+    max-mamba-cache-size: 97                     # Tony's soak-tested pool (~5.2G bf16); explicit, not auto
+    mamba-scheduler-strategy: extra_buffer
+    mamba-track-interval: 64
+    # kv-cache-dtype: fp8_e4m3   # MEASURED 2026-08-27: on SM121 the QSA backend falls back to the flash_attn
+    #                            # CuTe kernel, which asserts `q.dtype bf16 != k.dtype fp8_e4m3` at cudagraph
+    #                            # capture → boot dies. bf16 KV (default) until a patched QSA kernel path
+    #                            # (MiaAI/tonyd2wild images) proves fp8 KV works. House fp8-KV preference on hold HERE.
+    disable-radix-cache: true                    # tonyd2wild: radix/prefix cache + spec decode = garbage output bug; off until proven
+    # MTP spec decode — sglang calls it NEXTN; checkpoint keeps the MTP layer BF16. Cookbook's verified
+    # K: 3 steps / topk 1 / 4 draft tokens. If first boot fights on SM121, disable THIS block first.
+    # NEXTN spec decode — BACK ON with the pool fix above (the "!" floods were pool exhaustion, not spec
+    # itself). ReplaySSM handles the speculative state replay properly (Tony's soak-tested stack; accept
+    # rate 0.36-0.45 under 6-way load on NVFP4). Acceptance gate: the 6-way concurrent tool-carrying load
+    # test — single-request smokes prove NOTHING about this bug class (Tony's verification rule).
+    # NEXTN OFF for the Inferact checkpoint — sglang's DRAFT loader cannot load nvfp4-packed MTP experts:
+    # fused_moe_triton._load_w13 shape mismatch (2560 vs packed 1280), MEASURED 2026-08-27, and
+    # --speculative-draft-model-quantization modelopt_fp4 does NOT reach that code path (same crash).
+    # Spec on sglang needs a BF16-MTP checkpoint (RadixArk — Tony's accept 0.36-0.45). Re-enable then:
+    # speculative-algorithm: NEXTN
+    # speculative-num-steps: 3
+    # speculative-eagle-topk: 1
+    # speculative-num-draft-tokens: 4
+    # enable-linear-replayssm-spec: true
+    # speculative-attention-mode: decode
+    # cookbook warns: with NEXTN on, sglang RESETS max-running-requests to 48 unless set. Pinned to our
+    # REAL ceiling (6 — per the box owner): each running slot holds mamba/GDN state (~28MB/req measured)
+    # + KV share, so a low cap directly buys per-request context headroom.
+    max-running-requests: 6
+    # token-0 ("!") loop fix — MEASURED 2026-08-27: with the default flashinfer sampling backend every
+    # request degenerated into "!!!!..." within ~20 tokens (temp 1.0/0.7/0.6 alike) — flashinfer sampling
+    # kernels are broken on SM121. tonyd2wild's locked Spark config prescribes exactly this pair (their
+    # "token-0 loop" hardening), alongside radix-off which we already run:
+    sampling-backend: pytorch
+    disable-cuda-graph-padding: true
+    reasoning-parser: auto                      # cookbook's verified choice (resolves per-model); thinking stays ON (house default)
+    # tool-call-parser: qwen3_coder             # enable after verifying this build ships the parser name
+
+cluster:                                        # TP=2 across both Sparks over the ConnectX link
+  boxes: [box1, box2]                           # names from cluster.yaml — no IPs here, recipe stays portable
+  master_port: 25000
+
+dashboard: sparkdash                            # proxy fronts it on non-/v1 paths, gated by DASHBOARD_PASSWORD (.env)

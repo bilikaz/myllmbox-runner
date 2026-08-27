@@ -14,6 +14,10 @@ required fields beyond `vllm.model`, no sanitising. Whatever you put in flows st
   --name`, `name: false/null → omitted`. Any vLLM flag works; you don't edit Python to add one.
 - **`vllm.env`** — `NAME: value → -e NAME=value` into the container. Any env var.
 - **`vllm.entrypoint`** — override the image's entrypoint (e.g. `vllm` → `vllm serve`).
+- **`server.sglang`** — a non-empty flag dict here SELECTS SGLang mode: the runner launches
+  `python3 -m sglang.launch_server --model-path <model> --port <port>` (+ `--dist-init-addr`/`--nnodes`/
+  `--node-rank`/`--tp` on a cluster) instead of `vllm serve`. Same mapping rules as the vLLM dict; same
+  proxy/tunnel front (sglang serves `/v1/*` + `/health`). See `recipes/qwen38-flash-next-sglang/`.
 - **`vllm.mounts`** — extra `host:container` binds, raw.
 - **`cluster`** — presence turns on multi-node; absence = single node. You define the nodes.
 - **`dashboard: <name>`** — OPTIONAL web UI → `dashboards/<name>/` (its own `up.sh`/`down.sh` + a `dashboard.yaml`
@@ -62,7 +66,8 @@ addresses in `cluster.yaml`.
 
 - **The management LAN blocks arbitrary TCP ports** — only ssh. **All** cross-node traffic (NCCL *and* vLLM's
   gloo/message-queue) must go over the interconnect. The runner already pins this
-  (`NCCL_SOCKET_IFNAME`/`NCCL_IB_HCA`, `GLOO_SOCKET_IFNAME`, per-node `VLLM_HOST_IP` = the node's interconnect IP).
+  (`NCCL_SOCKET_IFNAME`/`NCCL_IB_HCA`, `GLOO_SOCKET_IFNAME`, per-node `VLLM_HOST_IP` AND `SGLANG_HOST_IP` =
+  the node's interconnect IP — sglang's shm_broadcast mq hangs in `wait_until_ready` forever without its pin).
   If you see a hang right after `backend=nccl` with `gloo ... Connection timed out` to a management-LAN addr,
   that pin is the fix.
 - **`cluster.boxes`** (names → `cluster.yaml`; legacy `cluster.nodes` = raw interconnect IPs still works); box 0
