@@ -42,7 +42,10 @@ server:
     served-model-name: Qwen/Qwen3.8-Flash-Next
     tensor-parallel-size: 1
     distributed-executor-backend: mp            # REQUIRED — see header (PLE worker spawn gap on uniproc)
-    kv-cache-memory: "32212254720"              # 30 GiB pin (user's call; vLLM offered 32.09 max) ≈ 1.24M tokens
+    gpu-memory-utilization: 0.85                # explicit (yaml was riding vLLM's 0.90 default) — leaves real
+                                                # headroom for PLE page cache + autotune workspaces + OS
+    kv-cache-memory: "21474836480"              # 20 GiB pin (trimmed from 30 — RAM pressure) ≈ 830k tokens,
+                                                # still >3 full-262k-context streams
     max-model-len: 262144
     # kv-cache-dtype: fp8   # REJECTED by the model, both engines (measured 2026-08-27): vLLM raises
     #                        # "Qwen3.8-Flash-Next QSA requires a BF16 main KV cache" at init; sglang's CuTe
