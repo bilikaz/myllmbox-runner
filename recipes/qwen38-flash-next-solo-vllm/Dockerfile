@@ -20,26 +20,50 @@ anchor = """        self.ngram_embedding = VocabParallelEmbedding(
             ),
         )"""
 patch = anchor + """
-        # MBX_PLE_MMAP: back the CPU-worker table with an (unlinked) NVMe file so shard copies write
-        # through to disk and pages stay evictable — UMA boxes can't afford 95G resident (see Dockerfile).
+        # MBX_PLE_MMAP: back the CPU-worker table with an NVMe file so shard copies write through to
+        # disk and pages stay evictable — UMA boxes can't afford 95G resident (see Dockerfile).
+        # With MBX_PLE_MMAP_TAG set, the file is PERSISTENT and reused across boots: first boot writes
+        # the 95G once and marks it complete; later boots mmap it and SKIP the copy entirely (load in
+        # seconds, no NVMe wear). Without a tag: throwaway unlinked file, rewritten each boot (safe default).
+        # Reset a stale table with: rm /cache/ple-mmap/*  (e.g. after switching checkpoints under one tag).
         import os as _os
         if (
             _os.environ.get("MBX_PLE_MMAP", "0") == "1"
             and envs.VLLM_PLE_CPU_OFFLOAD
             and is_offload_process()
         ):
-            import tempfile as _tf
             _w = self.ngram_embedding.weight
             _dir = _os.environ.get("MBX_PLE_MMAP_DIR", "/cache/ple-mmap")
             _os.makedirs(_dir, exist_ok=True)
-            _f = _tf.NamedTemporaryFile(dir=_dir, delete=False); _p2 = _f.name; _f.close()
             _numel = 1
             for _s in _w.shape:
                 _numel *= int(_s)
+            _tag = _os.environ.get("MBX_PLE_MMAP_TAG", "")
+            self._mbx_ple_prewarmed = False
+            self._mbx_ple_marker = None
+            if _tag:
+                _safe_prefix = str(prefix).replace("/", "_").replace(".", "_")
+                _p2 = _os.path.join(
+                    _dir,
+                    f"{_tag}-{_safe_prefix}-{'x'.join(str(int(_s)) for _s in _w.shape)}-{str(_w.dtype).split('.')[-1]}.bin",
+                )
+                _marker = _p2 + ".ok"
+                _esz = _w.element_size() if hasattr(_w, "element_size") else torch.empty((), dtype=_w.dtype).element_size()
+                _want = _numel * _esz
+                if _os.path.exists(_marker) and _os.path.getsize(_p2) == _want:
+                    self._mbx_ple_prewarmed = True
+                    logger.info("MBX_PLE_MMAP: reusing persistent PLE table %s (copy will be SKIPPED)", _p2)
+                else:
+                    self._mbx_ple_marker = _marker
+                    logger.info("MBX_PLE_MMAP: writing persistent PLE table %s (one-time)", _p2)
+            else:
+                import tempfile as _tf
+                _f = _tf.NamedTemporaryFile(dir=_dir, delete=False); _p2 = _f.name; _f.close()
             _t = torch.from_file(
                 _p2, shared=True, size=_numel, dtype=_w.dtype
             ).view(tuple(_w.shape))
-            _os.unlink(_p2)
+            if not _tag:
+                _os.unlink(_p2)
             _new = torch.nn.Parameter(_t, requires_grad=False)
             for _n, _v in vars(_w).items():
                 setattr(_new, _n, _v)
@@ -47,7 +71,42 @@ patch = anchor + """
 assert s.count(anchor) == 1, "ngram_embedding constructor anchor not found/unique — upstream changed"
 assert "MBX_PLE_MMAP" not in s, "already patched"
 s = s.replace(anchor, patch, 1)
-assert "is_offload_process" in s and "envs." in s, "expected imports missing from ple_layer.py"
+
+# load_weights: on a prewarmed table SKIP the shard copies (identical bytes — pure NVMe wear); after a
+# fresh table finishes its copies, sync and write the completion marker so the next boot can skip.
+la = """                copy_ple_embedding_shard_(
+                    embedding.weight.data,
+                    loaded_weight,
+                    checkpoint_start=checkpoint_start,
+                    tp_start=embedding.shard_indices.org_vocab_start_index,
+                    tp_end=embedding.shard_indices.org_vocab_end_index,
+                )
+                loaded.add("ngram_embedding.weight")
+                continue"""
+lp = """                if getattr(self, "_mbx_ple_prewarmed", False):
+                    loaded.add("ngram_embedding.weight")
+                    continue
+                copy_ple_embedding_shard_(
+                    embedding.weight.data,
+                    loaded_weight,
+                    checkpoint_start=checkpoint_start,
+                    tp_start=embedding.shard_indices.org_vocab_start_index,
+                    tp_end=embedding.shard_indices.org_vocab_end_index,
+                )
+                self._mbx_ple_shards_done = getattr(self, "_mbx_ple_shards_done", 0) + 1
+                if (
+                    getattr(self, "_mbx_ple_marker", None)
+                    and self._mbx_ple_shards_done >= self.split_ngram_parts
+                ):
+                    import os as _os
+                    _os.sync()
+                    open(self._mbx_ple_marker, "w").write("ok")
+                    logger.info("MBX_PLE_MMAP: persistent PLE table complete (marker written)")
+                loaded.add("ngram_embedding.weight")
+                continue"""
+assert s.count(la) == 1, "shard-copy anchor not found/unique — upstream changed"
+s = s.replace(la, lp, 1)
+assert "logger" in s, "logger missing from ple_layer.py"
 open(p, "w").write(s)
-print("ple_layer.py patched: PLE table file-backed under MBX_PLE_MMAP=1")
+print("ple_layer.py patched: PLE file-backed + write-once persistence under MBX_PLE_MMAP_TAG")
 PYEOF

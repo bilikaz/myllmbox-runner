@@ -26,6 +26,10 @@ server:
     HF_HUB_DISABLE_XET: "1"
     VLLM_PLE_CPU_OFFLOAD: "1"                   # table → CPU offload worker (single-node only upstream)
     MBX_PLE_MMAP: "1"                           # …and from there to NVMe via our patch. Never disable (house rule).
+    MBX_PLE_MMAP_TAG: "inferact-nvfp4"          # PERSISTENT table: first boot writes the 95G once (+ .ok marker),
+                                                # every later boot mmaps it and skips the copy — fast boots, no NVMe
+                                                # wear. Tag names the checkpoint: CHANGE IT if model: changes, or
+                                                # rm .data/cache/ple-mmap/* to reset.
     TORCH_CUDA_ARCH_LIST: "12.1a"
     FLASHINFER_CUDA_ARCH_LIST: "12.1a"
 
