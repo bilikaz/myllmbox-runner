@@ -52,10 +52,10 @@ patch = anchor + """
                 _want = _numel * _esz
                 if _os.path.exists(_marker) and _os.path.getsize(_p2) == _want:
                     self._mbx_ple_prewarmed = True
-                    logger.info("MBX_PLE_MMAP: reusing persistent PLE table %s (copy will be SKIPPED)", _p2)
+                    __import__("logging").getLogger("mbx.ple").info("MBX_PLE_MMAP: reusing persistent PLE table %s (copy will be SKIPPED)", _p2)
                 else:
                     self._mbx_ple_marker = _marker
-                    logger.info("MBX_PLE_MMAP: writing persistent PLE table %s (one-time)", _p2)
+                    __import__("logging").getLogger("mbx.ple").info("MBX_PLE_MMAP: writing persistent PLE table %s (one-time)", _p2)
             else:
                 import tempfile as _tf
                 _f = _tf.NamedTemporaryFile(dir=_dir, delete=False); _p2 = _f.name; _f.close()
@@ -101,12 +101,11 @@ lp = """                if getattr(self, "_mbx_ple_prewarmed", False):
                     import os as _os
                     _os.sync()
                     open(self._mbx_ple_marker, "w").write("ok")
-                    logger.info("MBX_PLE_MMAP: persistent PLE table complete (marker written)")
+                    __import__("logging").getLogger("mbx.ple").info("MBX_PLE_MMAP: persistent PLE table complete (marker written)")
                 loaded.add("ngram_embedding.weight")
                 continue"""
 assert s.count(la) == 1, "shard-copy anchor not found/unique — upstream changed"
 s = s.replace(la, lp, 1)
-assert "logger" in s, "logger missing from ple_layer.py"
 open(p, "w").write(s)
 print("ple_layer.py patched: PLE file-backed + write-once persistence under MBX_PLE_MMAP_TAG")
 PYEOF
