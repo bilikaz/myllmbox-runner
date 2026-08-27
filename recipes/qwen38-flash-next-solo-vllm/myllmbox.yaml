@@ -32,6 +32,7 @@ server:
                                                 # rm .data/cache/ple-mmap/* to reset.
     TORCH_CUDA_ARCH_LIST: "12.1a"
     FLASHINFER_CUDA_ARCH_LIST: "12.1a"
+    FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace   # autotune artifacts persist across boots
     OMP_NUM_THREADS: "4"                        # vLLM cuts serving procs to 1 torch thread ("Reducing Torch
                                                 # threads from 20 to 1 ... Set OMP_NUM_THREADS to override").
                                                 # The CPU-side PLE worker does K+1 gathers per MTP verify step —
