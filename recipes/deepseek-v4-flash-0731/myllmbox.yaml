@@ -40,9 +40,9 @@ server:
     distributed-executor-backend: mp            # dual-node = mp (no Ray); TP set by the launcher
     kv-cache-dtype: fp8_ds_mla                   # native packed DS-MLA KV (what the sparse kernels want)
     block-size: 256
-    max-model-len: 300000                        # 1M-monster capped at 300k per policy
-    max-num-seqs: 6
-    max-num-batched-tokens: 12288               #rduced form 16384 to get more kv
+    max-model-len: 400000                        # 1M-monster capped at 300k per policy
+    max-num-seqs: 8
+    max-num-batched-tokens: 8192               #rduced form 16384 to get more kv
     # moe-backend: auto → Marlin (the ONLY MoE that runs on SM121; deep_gemm MoE errors "kernel does not
     # support current device cuda" even with DeepGEMM #324 sm120 kernels + #41834. Compact-FP4 MoE is not
     # reachable on this build — that's the SM121 tax; only b12x/CUTLASS forks avoid it).
