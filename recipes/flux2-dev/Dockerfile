@@ -48,7 +48,7 @@ RUN pip install \
         Pillow fastapi "uvicorn[standard]" pydantic python-multipart
 
 WORKDIR /app
-COPY server.py /app/server.py
+COPY docker/server.py /app/server.py
 
 ENV PYTHONUNBUFFERED=1
 ENV HF_HUB_OFFLINE=1

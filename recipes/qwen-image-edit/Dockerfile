@@ -34,7 +34,7 @@ RUN pip install diffusers==0.39.0 transformers==5.14.1 accelerate==1.14.0 \
         Pillow fastapi "uvicorn[standard]" pydantic python-multipart
 
 WORKDIR /app
-COPY server.py /app/server.py
+COPY docker/server.py /app/server.py
 
 EXPOSE 8000
 ENTRYPOINT []

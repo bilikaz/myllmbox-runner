@@ -6,7 +6,10 @@
 # nvfp4 MTP experts — see the dual recipe). Uses the SAME patched image + same warm kernel cache.
 
 server:
-  image: mbx-qwen38-flash-next-sglang           # built by the dual recipe (QSA SM121 patch + PLE mmap patch)
+  image: mbx-qwen38-flash-next-solo-sglang      # built from THIS folder's Dockerfile (QSA SM121 patch + PLE
+                                                # file-backed patch). Keep Dockerfile+qsa_fa_fallback.py in
+                                                # sync with recipes/qwen38-flash-next-sglang (same content;
+                                                # docker layer cache dedups the actual image).
   model: /models/Inferact/Qwen3.8-Flash-Next-NVFP4
   cache: recipes/qwen38-flash-next-sglang/.data/cache   # shared with the dual recipe → kernels already warm
 
@@ -30,7 +33,7 @@ server:
     fp4-gemm-backend: flashinfer_cutlass
     context-length: 262144
     # 0.89×122.5 ≈ 109G pool − ~74G weights → ~35G KV+mamba on one box (PLE on NVMe):
-    mem-fraction-static: 0.89
+    mem-fraction-static: 0.93
     # no ep (single GPU); tp defaults to 1
     chunked-prefill-size: 16384                 # VLM ≥16k house rule
     mamba-ssm-dtype: bfloat16
