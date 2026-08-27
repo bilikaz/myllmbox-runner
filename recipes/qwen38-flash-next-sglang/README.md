@@ -44,3 +44,15 @@ Spec tier additionally needs RadixArk (bf16 MTP head).
 - [ ] RadixArk download resume → NEXTN with a head that accepts (2.5-3× target)
 - [ ] vLLM lane: image pulled, `vllm/v1/ple_offload/` located for the mmap port; Inferact is its official checkpoint
 - [ ] 6-way concurrent load test as acceptance gate (Tony's rule; single-request smokes prove nothing)
+
+## 2026-08-27 evening — ENDGAME: vLLM solo won (see recipes/qwen38-flash-next-solo-vllm)
+
+| serve | tok/s (warm, single stream) | notes |
+|---|---|---|
+| dual sglang (FP8 or NVFP4) | 11-12 | cross-node tax; spec broken (fp8 head accept 0.00 / draft loader can't load nvfp4 head) |
+| solo vLLM, Inferact, spec off | 16 | vLLM's own SM121 kernels, PLE from NVMe |
+| **solo vLLM, Inferact, MTP K=3** | **22** | **accept 63-70%, mean chain ~2.9-3.1/4** — vLLM's Qwen3_8FlashNextMTP loads the nvfp4 head fine |
+
+Both Sparks now run the solo-vllm recipe independently (~44 tok/s fleet aggregate, each with 924k-1.24M-token
+KV, vision on, 262k ctx). PLE persistence (MBX_PLE_MMAP_TAG) makes warm boots ~2 min. sglang lane retired
+for this model: slower QSA fallback + broken spec path; recipes kept for reference.
