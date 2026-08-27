@@ -42,7 +42,10 @@ server:
     max-num-seqs: 6
     max-num-batched-tokens: 16384               # VLM ≥16k house rule
     enable-prefix-caching: true
-    no-enable-flashinfer-autotune: true
+    # no-enable-flashinfer-autotune: true   # OFF (autotune ENABLED) since 2026-08-27: the disable came from
+    #                                       # the official multi-GPU commands; solo/1-GPU we let FlashInfer
+    #                                       # tune its kernels at warmup (adds warmup time; artifacts persist
+    #                                       # under /cache). Re-add the flag if warmup crashes on SM121.
     enable-auto-tool-choice: true
     tool-call-parser: qwen3_xml                 # per the updated official recipe page (was qwen3_coder)
     reasoning-parser: qwen3
