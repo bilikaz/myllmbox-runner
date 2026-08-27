@@ -46,6 +46,6 @@ server:
     enable-auto-tool-choice: true
     tool-call-parser: qwen3_xml                 # per the updated official recipe page (was qwen3_coder)
     reasoning-parser: qwen3
-    speculative-config: '{"method":"mtp","num_speculative_tokens":3}'   # see MTP note in header — proven
+    speculative-config: '{"method":"mtp","num_speculative_tokens":2}'   # K=2: per-position accept 0.74/0.63/0.52 — third draft weakest, each draft = serial MTP forward (A/B vs K=3s 22 tok/s)
 
 dashboard: sparkdash
