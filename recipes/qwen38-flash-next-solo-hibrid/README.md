@@ -91,7 +91,9 @@ code-only diet to break even, at an even lower floor).
 - The image carries `MBX_INDEX_STRICT=1`: hardlinked hibrid checkpoints leave stale originals in
   the source shards, and vLLM iterates *files*, not the index — without the patch the packed 4-bit
   weights shape-assert on the stale bf16 copies at load.
-- The 25,000,000,000-byte KV pin is deliberate: the full 25 GiB booted with ~240MB free and 5G of
+- The 25,000,000,000-byte KV pin buys a **~800k-token KV pool** (~790k measured at the 25 GiB
+  variant) — about **3× full 262k-context concurrency**, or dozens of typical agent sessions with
+  prefix caching. The round number is deliberate: the full 25 GiB booted with ~240MB free and 5G of
   swap at the flashinfer-autotune peak. If a boot hard-OOMs anyway, warm the autotune cache once
   at a lower pin, then relaunch — don't raise `gpu-memory-utilization` for a boot-time transient.
 - `VLLM_MARLIN_USE_ATOMIC_ADD=1` is self-gating (small-N GEMMs only); `MBX_VOCAB_GEMV=1` is the

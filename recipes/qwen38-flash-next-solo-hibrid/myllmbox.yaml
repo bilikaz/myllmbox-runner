@@ -18,12 +18,12 @@
 #   fp8 hibrid (old):  12.8 steps, code 46-50, peak 50.0 — superseded (this folder's git history).
 # Experiment trail: recipes/qwen38-flash-next-solo-test (uncommitted lane).
 #
-# OUT OF THE BOX (fresh user, three commands — FIRST BOOT CONVERTS AUTOMATICALLY):
-#   1. ./download.sh Inferact/Qwen3.8-Flash-Next-NVFP4          # the source checkpoint (~183G)
-#   2. ./build-and-copy.sh qwen38-flash-next-solo-hibrid        # the image (patches + converter inside)
-#   3. ./run.sh qwen38-flash-next-solo-hibrid                   # first boot builds the checkpoint
-#      (CPU-only ~5-10 min, once; later boots fast-skip). Manual pre-build:
-#      ./recipes/qwen38-flash-next-solo-hibrid/make-hibrid45.sh
+# OUT OF THE BOX — ONE command does everything (image build -> source download if absent ->
+# checkpoint conversion -> serve; later boots fast-skip all of it):
+#   ./run.sh qwen38-flash-next-solo-hibrid
+# Manual pre-steps still work if you want them staged: ./download.sh Inferact/Qwen3.8-Flash-Next-NVFP4
+# (~183G source), ./recipes/qwen38-flash-next-solo-hibrid/make-hibrid45.sh (CPU-only conversion,
+# safe alongside a running serve).
 # The image also carries MBX_INDEX_STRICT (default on): hardlinked hibrid checkpoints leave stale
 # originals in the old shards and vLLM iterates FILES, not the index — packed 4-bit weights
 # shape-assert on the stale bf16 copies without it (the fp8 era survived only by shard sort order).
