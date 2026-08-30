@@ -57,6 +57,11 @@ Scripts self-bootstrap `.venv` — never activate anything by hand. To stop a bo
    absolute path on every cluster node**.
 3. if it has a `Dockerfile`: `./build-and-copy.sh <name>` (builds on the head, copies to workers).
 4. `./run.sh <name>`; verify with a real completion, not just that it "came up".
+5. **the gauntlet** — every text-model recipe ships `tests/` with TWO rendered outputs from the
+   standing quality prompts: `pasture.html` and `fish.html` (one-shot generations, best of 3 runs,
+   saved raw). The USER runs the generations (never fire them yourself — house rule); you commit the
+   winners. These are the recipe's quality proof — the site's model pages port them. Reference:
+   `recipes/qwen38-flash-next/tests/`.
 
 ## The cluster — hard rules (this hardware bit us; don't relearn it)
 The physical boxes live in **`cluster.yaml`** (gitignored, per-machine) as named boxes — each with its ssh

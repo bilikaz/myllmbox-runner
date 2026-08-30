@@ -150,3 +150,11 @@ Old yamls (`recipe_version: "1"`, `container:`, `mods:`, `run-recipe.sh`, LAN po
 `server.mounts` (models dir is already mounted) · `solo_only` → just omit `cluster:`. Keep the model
 facts (quant config, skip_modules, defaults, verified timings); rewrite the plumbing. Endpoints are
 reached through the tunnel URL now, never `http://<host>:8001`.
+
+## The gauntlet (every text-model recipe)
+
+A recipe isn't done until `tests/` holds the TWO standing quality renders: `pasture.html` and
+`fish.html` — one-shot generations from the house gauntlet prompts, best of 3 runs each, raw HTML
+saved as generated. The USER runs the generations (never fire test load yourself); commit their
+picked winners. This is the recipe's quality proof and what the site's model page shows next to
+the speed stats. Reference example: `recipes/qwen38-flash-next/tests/`.
