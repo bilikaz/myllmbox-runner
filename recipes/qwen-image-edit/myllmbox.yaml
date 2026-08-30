@@ -19,6 +19,7 @@
 server:
   image: mbx-qwen-image-edit                            # built from this recipe's Dockerfile (torchao serve stack)
   model: /models/myllmbox/Qwen-Image-Edit-2511-nvfp4    # the PRE-QUANT (from ./quantize.sh)
+  cache: recipes/qwen-image-edit/.data/cache                     # recipe-OWNED scratch -> /cache (never write into models/)
   uvicorn:                                              # GENERIC FastAPI server → uvicorn <app> --host --port
     app: server:app                                     #   port = server.port (8000, same as vLLM → uniform proxy)
     host: 0.0.0.0
@@ -26,7 +27,9 @@ server:
 
   env:
     MODEL_PATH: /models/myllmbox/Qwen-Image-Edit-2511-nvfp4   # load the pre-quant directly
-    QUANT_PRELOADED: "1"                                      # → server.py loads it as-is (no on-the-fly quant, no BF16 peak)
+    QUANT_PRELOADED: "1"
+    QUANT_CACHE_DIR: /cache/quant                            # legacy on-the-fly fallback caches HERE, not models/
+                                                             # (models/.cache/* was the old design's dumping ground)                                      # → server.py loads it as-is (no on-the-fly quant, no BF16 peak)
     SERVED_MODEL_NAME: Qwen/Qwen-Image-Edit-2511
 
     # SPEED: 4-step Lightning distillation LoRA (lightx2v) → ~10x fewer steps, stacks with NVFP4 (~4x/step).
