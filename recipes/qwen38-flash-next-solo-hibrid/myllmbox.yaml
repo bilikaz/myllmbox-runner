@@ -1,0 +1,78 @@
+# Qwen3.8-Flash-Next HIBRID — Inferact NVFP4 experts + OUR block-FP8 dense projections, solo box.
+# THE THESIS (measured 2026-08-29): the validator step streams ~8.5 GiB/step, of which ~7 GiB is BF16
+# dense — the one slice no public checkpoint quantizes (verified: the official "FP8" ckpt quantizes
+# experts ONLY; dense is BF16 there and in Inferact/RadixArk). Converting the decode-path dense set
+# (~5.5 GiB -> ~2.8 GiB, GDN in_proj*/out_proj + QSA q/k/v/o + shared expert) cuts step bytes ~30% ->
+# projected ~13-15 steps/s = ~40 tok/s mixed / ~50 code at K=3, solo. lm_head/embeds/mHC/norms/vision/
+# MTP/PLE stay BF16 (mirrors Alibaba's own fp8 exclusions — the quality-sensitive set).
+#
+# BUILD ORDER (one-time):
+#   1. ./recipes/qwen38-flash-next-solo-hibrid/make-hibrid.sh   # CPU, ~10 min, writes
+#      models/myllmbox/Qwen3.8-Flash-Next-hibrid (originals hardlinked, +~3G fp8 shard)
+#   2. ./build-and-copy.sh qwen38-flash-next-solo-hibrid        # image with the FP8_PB_WO dispatch splice
+#   3. ./run.sh qwen38-flash-next-solo-hibrid
+# ============================== CHAMPION — VALIDATED 2026-08-30 ==============================
+# THE fastest known single-box config for this model, pasture-gated: 12.8 steps/s, drafted 38.4,
+# code sustained 46-50, PEAK 50.0 tok/s (accept len 3.94/4). One Spark ≈ Alibaba's own 53 tok/s
+# hosting; beats every known community config short of a four-box GLM TP4. The stack: our fp8
+# dense (+30% steps) + CUTLASS block-fp8 (b12x tested = parity) + vendored b12x lm_head GEMV
+# (+5.5%) + K=3 MTP. Judge speed by DRAFTED throughput; gate any kernel change with the pasture.
+
+server:
+  image: mbx-qwen38-flash-next-solo-hibrid      # built from THIS folder's Dockerfile
+  entrypoint: vllm
+  model: /models/myllmbox/Qwen3.8-Flash-Next-hibrid
+  cache: recipes/qwen38-flash-next-solo-vllm/.data/cache   # shared: SAME PLE table bytes (hardlinked
+                                                # shards) -> same tag reuses the banked 95G table + caches
+
+  env:
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    HF_HUB_DISABLE_XET: "1"
+    VLLM_PLE_CPU_OFFLOAD: "1"
+    MBX_PLE_MMAP: "1"                           # never disable (house rule)
+    MBX_PLE_MMAP_TAG: "inferact-nvfp4"          # table bytes identical to Inferact (hardlinks) — reuse bank
+    TORCH_CUDA_ARCH_LIST: "12.1a"
+    FLASHINFER_CUDA_ARCH_LIST: "12.1a"
+    FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
+    VLLM_CACHE_ROOT: /cache/vllm-cache
+    OMP_NUM_THREADS: "15"
+    VLLM_USE_DEEP_GEMM: "0"                     # REQUIRED on GB10: vLLM sees "Blackwell" and routes our
+                                                # block-FP8 dense GEMMs to DeepGEMM, whose kernels are
+                                                # SM100-only -> cudaErrorLaunchFailure in the first forward
+                                                # (profile_run). With it off the selector picks CUTLASS
+                                                # block-fp8 (works on SM121 in THIS vLLM; the old "cutlass
+                                                # fails on GB10" note was the DS-V4-era v0.26 stack).
+    MBX_VOCAB_GEMV: "1"                         # ACTIVE A/B: M=1 lm_head via Triton GEMV — b12x measured
+                                                # 6.77->4.74ms on this head; runs 3x/cycle at K=3 (every
+                                                # draft step) => ~6ms of an ~85ms cycle, expected +5-7%
+                                                # steps. Baseline: drafted 35.4-36.3 / peak 47.0.
+    # MBX_FP8_LINEAR_KERNEL: "b12x"             # TESTED 2026-08-29: PARITY with CUTLASS (drafted 35.4-36.3
+                                                # both, peak 47.0 vs 46.9 = accept noise) — both at the DRAM
+                                                # floor at M=1-8. Default = stock dispatch (CUTLASS): fewer
+                                                # moving parts. b12x stays a proven-equivalent alternate
+                                                # (needed image patch: compile-opaque custom-op wrapper —
+                                                # upstream's lazy importlib dies under torch.compile).
+                                                # dense block-fp8 kernel — b12x = native SM121 CuTe GEMM,
+                                                # also: cutlass | triton | marlin. Unset = auto (CUTLASS).
+                                                # Safe to flip between boots: the Dockerfile keys the
+                                                # torch-compile cache on this env (fresh compile per value).
+
+  vllm:
+    served-model-name: Qwen/Qwen3.8-Flash-Next
+    tensor-parallel-size: 1
+    distributed-executor-backend: mp            # REQUIRED — PLE worker spawn gap on uniproc
+    gpu-memory-utilization: 0.85
+    kv-cache-memory: "21474836480"              # 20 GiB pin (prod parity; body is ~3G SMALLER than prod —
+                                                # raise later if the fit proves roomy)
+    max-model-len: 262144
+    async-scheduling: false                     # unfixed async+MTP n-gram bug (PR #53896)
+    max-num-seqs: 6
+    max-num-batched-tokens: 16384
+    enable-prefix-caching: true
+    enable-auto-tool-choice: true
+    tool-call-parser: qwen3_xml
+    reasoning-parser: qwen3
+    speculative-config: '{"method":"mtp","num_speculative_tokens":3}'   # K=3 (current champion setting)
+
+dashboard: sparkdash
