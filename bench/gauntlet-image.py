@@ -62,6 +62,9 @@ def main() -> None:
     ap.add_argument("--token", default=None, help="bearer token (needed through the proxy/tunnel)")
     ap.add_argument("--seeds", default=",".join(map(str, SEEDS)))
     ap.add_argument("--prompts", default=",".join(PROMPTS))
+    ap.add_argument("--size", default=None,
+                    help="output size WxH (e.g. 1280x720 = the canonical speed tier; omit = server auto ~4.2MP). "
+                         "Avoid exactly 1024x1024 on qwen-image-edit (the known trap size).")
     ap.add_argument("--timeout", type=int, default=420)
     a = ap.parse_args()
 
@@ -84,15 +87,17 @@ def main() -> None:
         for seed in (int(s) for s in a.seeds.split(",")):
             t0 = time.time()
             if a.mode == "edit":
-                body, ctype = multipart({"model": model, "prompt": prompt, "seed": seed},
-                                        "image", "canvas.png", canvas)
+                fields = {"model": model, "prompt": prompt, "seed": seed}
+                if a.size:
+                    fields["size"] = a.size
+                body, ctype = multipart(fields, "image", "canvas.png", canvas)
                 req = urllib.request.Request(base + "/v1/images/edits", data=body, method="POST",
                                              headers={"Content-Type": ctype, **auth})
             else:
                 req = urllib.request.Request(
                     base + "/v1/images/generations", method="POST",
                     data=json.dumps({"model": model, "prompt": prompt, "seed": seed,
-                                     "size": "1920x1080"}).encode(),
+                                     "size": a.size or "1920x1080"}).encode(),
                     headers={"Content-Type": "application/json", **auth})
             try:
                 with urllib.request.urlopen(req, timeout=a.timeout) as r:
@@ -100,7 +105,8 @@ def main() -> None:
                 import base64
                 png = base64.b64decode(resp["data"][0]["b64_json"])
                 dt = time.time() - t0
-                path = os.path.join(outdir, f"{prompt_name}-s{seed}.png")
+                tag = f"-{a.size}" if a.size else ""
+                path = os.path.join(outdir, f"{prompt_name}{tag}-s{seed}.png")
                 open(path, "wb").write(png)
                 print(f"  {prompt_name} seed {seed}: {dt:.0f}s -> {path}")
                 report["runs"].append({"prompt": prompt_name, "seed": seed,

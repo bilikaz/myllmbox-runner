@@ -47,9 +47,10 @@ server:
     # (~1-2 min). Set "0" for varied sizes / no stalls (~10-15% slower per image).
     COMPILE_BLOCKS: "1"
 
-    # size=auto edit target area (px). EDIT RESOLUTION FLOOR: edits collapse to a neon-posterized identity
-    # copy when either output dim <= 1024; from ~1328² (Qwen native) up they're excellent. server.py size=auto
-    # targets EDIT_AUTO_PIXELS at input aspect. 2048²@8st ≈ 75-81s; 1328²@8st ≈ 21-27s. Pass size=input for raw.
+    # size=auto edit target area (px). THE 1024 TRAP (exact, verified): edits break ONLY when the output
+    # size equals the input size AND a dimension is exactly 1024 — nudge any dim to escape. All other sizes
+    # incl. <1024 are fine. server.py size=auto targets EDIT_AUTO_PIXELS at input aspect.
+    # Measured: 2.7K (2736x1536) @8st = ~78s. Pass size=input for raw.
     EDIT_AUTO_PIXELS: "4194304"
     DEFAULT_STEPS: "8"                                        # 4-step LoRA run at 4-8 (per-request override); 8 = more detail
     DEFAULT_TRUE_CFG: "1.0"                                   # Lightning ⇒ CFG OFF (>1 doubles work AND fights distillation)
