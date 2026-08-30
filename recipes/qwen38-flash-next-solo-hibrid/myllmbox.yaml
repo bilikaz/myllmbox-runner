@@ -46,7 +46,7 @@ server:
     FLASHINFER_CUDA_ARCH_LIST: "12.1a"
     FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
     VLLM_CACHE_ROOT: /cache/vllm-cache
-    OMP_NUM_THREADS: "15"
+    OMP_NUM_THREADS: "18"
     MBX_VOCAB_GEMV: "1"                         # championship-proven on the fp8 hibrid (+5.5% steps)
     VLLM_MARLIN_USE_ATOMIC_ADD: "1"             # Marlin small-N fast path (its own warmup hint; also
                                                 # used in our DS-V4 MoE stack). Self-gating: only fires
@@ -58,10 +58,13 @@ server:
     tensor-parallel-size: 1
     distributed-executor-backend: mp            # REQUIRED — PLE worker spawn gap on uniproc
     gpu-memory-utilization: 0.85
-    kv-cache-memory: "21474836480"              # 20 GiB pin (champion parity; body ~1.1G lighter still)
+    kv-cache-memory: "25000000000"              # 25 GB decimal = 23.3 GiB (~790k KV tokens, ~3x full-
+                                                # context concurrency). The full 25 GiB (26843545600)
+                                                # nearly OOMed the autotune peak (~240MB free, 5G swap)
+                                                # — this round number leaves ~1.5G boot headroom.
     max-model-len: 262144
     async-scheduling: false                     # unfixed async+MTP n-gram bug (PR #53896)
-    max-num-seqs: 6
+    max-num-seqs: 8
     max-num-batched-tokens: 16384
     enable-prefix-caching: true
     enable-auto-tool-choice: true
