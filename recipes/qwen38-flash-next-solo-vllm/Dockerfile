@@ -101,6 +101,10 @@ lp = """                if getattr(self, "_mbx_ple_prewarmed", False):
                     import os as _os
                     _os.sync()
                     open(self._mbx_ple_marker, "w").write("ok")
+                    # world-readable: the (non-root) runner may copy the bank (table_server).
+                    # _p2 is an __init__ local — derive the table path from the stored marker.
+                    _os.chmod(self._mbx_ple_marker[: -len(".ok")], 0o644)
+                    _os.chmod(self._mbx_ple_marker, 0o644)
                     __import__("logging").getLogger("mbx.ple").info("MBX_PLE_MMAP: persistent PLE table complete (marker written)")
                 loaded.add("ngram_embedding.weight")
                 continue"""

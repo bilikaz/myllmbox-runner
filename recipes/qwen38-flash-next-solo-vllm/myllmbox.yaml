@@ -37,8 +37,9 @@ server:
                                                 # ...autotune_configs.json — boot log said "0 from previous"
                                                 # while saving under ephemeral /root/.cache/vllm) + vLLM's own
                                                 # compile cache. Without this every boot re-tunes from scratch.
-    OMP_NUM_THREADS: "4"                        # vLLM cuts serving procs to 1 torch thread ("Reducing Torch
+    OMP_NUM_THREADS: "15"                       # vLLM cuts serving procs to 1 torch thread ("Reducing Torch
                                                 # threads from 20 to 1 ... Set OMP_NUM_THREADS to override").
+                                                # 15 measured ~+5% step rate vs 10 (drafted-throughput A/B).
                                                 # The CPU-side PLE worker does K+1 gathers per MTP verify step —
                                                 # single-threaded that serializes inside the spec cycle. 4 of the
                                                 # 20 Grace cores for it; raise if gathers still show as the drag.
@@ -55,6 +56,10 @@ server:
     # kv-cache-dtype: fp8   # REJECTED by the model, both engines (measured 2026-08-27): vLLM raises
     #                        # "Qwen3.8-Flash-Next QSA requires a BF16 main KV cache" at init; sglang's CuTe
     #                        # path asserted the same incompatibility. bf16 KV is architectural here.
+    async-scheduling: false                     # auto-ON with MTP in this build, but upstream-confirmed UNFIXED bug
+                                                # (PR #53896): async sched + MTP feeds -1/0 placeholders into
+                                                # _prepare_ngram_context -> wrong PLE n-gram context ~every decode
+                                                # step (silent quality + accept-rate loss). Re-enable when fixed.
     max-num-seqs: 6
     max-num-batched-tokens: 16384               # VLM ≥16k house rule
     enable-prefix-caching: true
@@ -65,6 +70,6 @@ server:
     enable-auto-tool-choice: true
     tool-call-parser: qwen3_xml                 # per the updated official recipe page (was qwen3_coder)
     reasoning-parser: qwen3
-    speculative-config: '{"method":"mtp","num_speculative_tokens":3}'   # A/B 2026-08-27: K=2 + autotune = 23.3-23.4 warm HTML (vs 21 at K=3 pre-autotune); now retesting K=3 on the tuned stack
+    speculative-config: '{"method":"mtp","num_speculative_tokens":2}'   # K=2 SETTLED (A/B 2026-08-27 on the autotuned stack): K=2 23.3-23.4 vs K=3 20.8-22.9 warm HTML; K=3's third draft accepts only ~0.16 (single MTP layer reused K times — decay is architectural)
 
 dashboard: sparkdash
