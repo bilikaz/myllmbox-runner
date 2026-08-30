@@ -84,6 +84,22 @@ code-only diet to break even, at an even lower floor).
 - **cold prefill vs warm ingest** — fresh-prompt compute vs prefix-cache replay; the latter is what
   agent clients feel as time-to-first-token.
 
+## TODO — parked experiment: widen the attention span (indexer_budget 2048 → 4096)
+
+QSA is *sparse* attention: for every query the indexer picks the top-N tokens out of the whole
+262k context and attention reads only those. Stock N = **2048** (`text_config.indexer_budget` in
+config.json → `token_topk` in vLLM's `indexer_qsa.py:120`). That's the model's true "reading
+window" per step — everything else in context is invisible to that query.
+
+The experiment: **4096**. Expected: better long-context recall / fewer "it didn't see the line"
+misses on big codebases, at near-free decode cost (the indexer scores all tokens anyway; only the
+top-K gather widens). Risk: the model was trained at 2048 — wider may admit noise tokens.
+
+How to run it: either a vLLM override in the yaml
+(`hf-overrides: '{"text_config": {"indexer_budget": 4096}}'`) or fold it into make-hibrid45.py's
+config rewrite. Judge: a long-context needle test + the pasture + the accept-rate watch (same
+protocol as every other knob). UNTESTED — parked until a box and a test session are free.
+
 ## Ops notes
 
 - First boot converts the checkpoint automatically (entrypoint fast-skips once complete);
