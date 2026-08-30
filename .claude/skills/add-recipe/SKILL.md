@@ -153,8 +153,11 @@ reached through the tunnel URL now, never `http://<host>:8001`.
 
 ## The gauntlet (every text-model recipe)
 
-A recipe isn't done until `tests/` holds the TWO standing quality renders: `pasture.html` and
-`fish.html` — one-shot generations from the house gauntlet prompts, best of 3 runs each, raw HTML
-saved as generated. The USER runs the generations (never fire test load yourself); commit their
-picked winners. This is the recipe's quality proof and what the site's model page shows next to
-the speed stats. Reference example: `recipes/qwen38-flash-next/tests/`.
+A recipe isn't done until `tests/` holds the TWO standing gauntlet outputs (canonical prompts in
+`bench/`): text models render `pasture.html` + `fish.html` (bench/pasture-text.txt / fish-text.txt,
+one-shot, raw HTML as generated); image models generate `pasture.png` + `fish.png`
+(bench/pasture-image.txt / fish-image.txt — HD-quality directives included; edit-only models take a
+plain reference input per their API). Best of 3 runs each. The USER runs the generations (never
+fire test load yourself); commit their picked winners. Same checklist scenes across every model =
+a countable capability comparison — the recipe's quality proof, shown on the site's model page
+next to the speed stats. Reference example: `recipes/qwen38-flash-next/tests/`.

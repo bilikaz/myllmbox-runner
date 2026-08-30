@@ -1,0 +1,25 @@
+A cheerful pasture scene in a clean flat-illustration style (no photorealism, no text anywhere in
+the image).
+
+SKY & GROUND: light-blue sky gradient over the upper two thirds, bright green grass over the lower
+third, a clear horizon line. A yellow sun with a soft halo and at least 6 visible rays, high in the
+sky. At least 3 white clouds, each clearly built from several overlapping puffs (not a single
+smooth blob).
+
+TREES: at least 2 trees standing firmly ON the grass — brown trunk, full green canopy that reads as
+foliage, not a green ball on a stick.
+
+ANIMALS — exactly 4, one of each species, all standing on the grass, spaced apart, none
+overlapping, each clearly recognizable at a glance without labels, roughly correct relative sizes
+(horse largest, pig smallest):
+- COW: white body with at least 3 black patches, exactly 4 visible legs, 2 horns or ears, 2 eyes,
+  and a pink udder or pink nose.
+- SHEEP: fluffy white wool that reads as texture (many puffs, not one smooth oval), exactly 4 dark
+  legs, a dark gray/black face, 2 eyes, 2 ears.
+- PIG: pink rounded body, exactly 4 legs, a clear pink snout with 2 nostrils, 2 small triangular
+  ears, 2 eyes, a curly tail.
+- HORSE: brown body longer than tall, exactly 4 long legs, a long neck with a visible darker mane,
+  2 ears, 2 eyes, a tail.
+
+Every animal has its head clearly visible in profile or turned toward the viewer. Bright daylight,
+friendly storybook mood, crisp shapes, flat colors with simple shading.
