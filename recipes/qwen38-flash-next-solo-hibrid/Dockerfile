@@ -237,6 +237,15 @@ open(p, "w").write(s)
 print("b12x_block.py: compile-opaque custom-op wrapper installed")
 PYEOF
 
+# ---- OUT-OF-THE-BOX: first-boot self-conversion. The serve container carries the converter and the
+# entrypoint wrapper runs it before vllm: checkpoint already complete -> instant skip; missing ->
+# built from the Inferact source on /models (CPU-only, ~5-10 min, ONCE); source missing -> clear
+# message naming the ./download.sh command. So a fresh user needs exactly:
+#   ./download.sh Inferact/Qwen3.8-Flash-Next-NVFP4 && ./build-and-copy.sh <this> && ./run.sh <this>
+COPY docker/serve-entry.sh /opt/mbx/serve-entry.sh
+COPY docker/make-hibrid.py /opt/mbx/make-hibrid.py
+RUN chmod +x /opt/mbx/serve-entry.sh
+
 # ---- MBX_VOCAB_GEMV: M=1 lm_head via Triton GEMV (vendored from b12x master, see the module
 # docstring in docker/mbx_vocab_gemv.py — measured 6.77 -> 4.74 ms on this exact head shape).
 # Env-gated OFF by default; flip MBX_VOCAB_GEMV=1 in the recipe yaml to A/B.

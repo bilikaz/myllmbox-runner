@@ -46,8 +46,32 @@ FUSED_GROUPS = {
     "linear_attn.in_proj_qkvz": ("linear_attn.in_proj_qkv", "linear_attn.in_proj_z"),
 }
 
+def _complete() -> bool:
+    """True when a finished hibrid checkpoint already sits at DST (first-boot fast path)."""
+    try:
+        qc = json.load(open(f"{DST}/config.json")).get("quantization_config") or {}
+        if qc.get("quant_algo") != "MIXED_PRECISION" or not qc.get("quantized_layers"):
+            return False
+        idx = json.load(open(f"{DST}/model.safetensors.index.json"))
+        shard = f"{DST}/model-hibrid-fp8.safetensors"
+        return (
+            any(v == "model-hibrid-fp8.safetensors" for v in idx["weight_map"].values())
+            and os.path.exists(shard) and os.path.getsize(shard) > 2 * 2**30
+        )
+    except Exception:
+        return False
+
+
 def main() -> None:
+    if _complete():
+        print(f"hibrid checkpoint already complete: {DST} — skipping conversion")
+        return
     idx_path = f"{SRC}/model.safetensors.index.json"
+    if not os.path.exists(idx_path):
+        raise SystemExit(
+            f"source checkpoint missing: {SRC}\n"
+            "fetch it first (on the host): ./download.sh Inferact/Qwen3.8-Flash-Next-NVFP4"
+        )
     index = json.load(open(idx_path))
     wmap = dict(index["weight_map"])
 
@@ -192,6 +216,16 @@ def main() -> None:
     json.dump(cfg, open(f"{DST}/config.json", "w"), indent=1)
 
     os.system(f"chmod -R a+r {DST}")
+    # first-boot conversion runs as root in the serve container — hand the output to whoever owns
+    # the /models mount so the host user can manage it (flux2 quantizer lesson: root-owned outputs).
+    try:
+        st = os.stat("/models")
+        for root, dirs, files in os.walk(DST):
+            for n in dirs + files:
+                os.chown(os.path.join(root, n), st.st_uid, st.st_gid)
+        os.chown(DST, st.st_uid, st.st_gid)
+    except OSError:
+        pass  # not running as root / not a mount — fine
     print(f"HIBRID checkpoint ready: {DST}")
 
 if __name__ == "__main__":

@@ -6,5 +6,5 @@ cd "$(dirname "$0")/../.."
 mkdir -p models/myllmbox
 docker run --rm --entrypoint python3 \
   -v "$PWD/models:/models" \
-  -v "$PWD/recipes/qwen38-flash-next-solo-hibrid/make-hibrid.py:/make-hibrid.py:ro" \
+  -v "$PWD/recipes/qwen38-flash-next-solo-hibrid/docker/make-hibrid.py:/make-hibrid.py:ro" \
   mbx-qwen38-flash-next-solo-vllm /make-hibrid.py

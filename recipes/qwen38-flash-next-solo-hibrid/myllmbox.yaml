@@ -6,11 +6,12 @@
 # projected ~13-15 steps/s = ~40 tok/s mixed / ~50 code at K=3, solo. lm_head/embeds/mHC/norms/vision/
 # MTP/PLE stay BF16 (mirrors Alibaba's own fp8 exclusions — the quality-sensitive set).
 #
-# BUILD ORDER (one-time):
-#   1. ./recipes/qwen38-flash-next-solo-hibrid/make-hibrid.sh   # CPU, ~10 min, writes
-#      models/myllmbox/Qwen3.8-Flash-Next-hibrid (originals hardlinked, +~3G fp8 shard)
-#   2. ./build-and-copy.sh qwen38-flash-next-solo-hibrid        # image with the FP8_PB_WO dispatch splice
-#   3. ./run.sh qwen38-flash-next-solo-hibrid
+# OUT OF THE BOX (fresh user, three commands — the FIRST BOOT CONVERTS AUTOMATICALLY):
+#   1. ./download.sh Inferact/Qwen3.8-Flash-Next-NVFP4          # the source checkpoint (~183G)
+#   2. ./build-and-copy.sh qwen38-flash-next-solo-hibrid        # the image (patches + converter inside)
+#   3. ./run.sh qwen38-flash-next-solo-hibrid                   # first boot builds the hibrid checkpoint
+#      (CPU-only ~5-10 min, once — entrypoint wrapper; later boots fast-skip). Manual pre-build still
+#      works too: ./recipes/qwen38-flash-next-solo-hibrid/make-hibrid.sh
 # ============================== CHAMPION — VALIDATED 2026-08-30 ==============================
 # THE fastest known single-box config for this model, pasture-gated: 12.8 steps/s, drafted 38.4,
 # code sustained 46-50, PEAK 50.0 tok/s (accept len 3.94/4). One Spark ≈ Alibaba's own 53 tok/s
@@ -20,7 +21,9 @@
 
 server:
   image: mbx-qwen38-flash-next-solo-hibrid      # built from THIS folder's Dockerfile
-  entrypoint: vllm
+  entrypoint: /opt/mbx/serve-entry.sh           # first-boot self-conversion, then exec vllm serve
+                                                # (checkpoint complete = instant skip; source missing =
+                                                # clear ./download.sh message instead of a load error)
   model: /models/myllmbox/Qwen3.8-Flash-Next-hibrid
   cache: recipes/qwen38-flash-next-solo-vllm/.data/cache   # shared: SAME PLE table bytes (hardlinked
                                                 # shards) -> same tag reuses the banked 95G table + caches
