@@ -1,16 +1,38 @@
 # myllmbox
 
 Turn a machine — or **N DGX Sparks** — into an LLM box with one command. A *recipe* is a folder; running it
-brings up the vLLM model container, a keepalive proxy, and a cloudflared tunnel. You never touch a venv,
+brings up the model container, a keepalive proxy, and a cloudflared tunnel. You never touch a venv,
 docker args, or NCCL flags — it's all in the recipe.
 
 ```bash
-./download.sh Qwen/Qwen3-0.6B          # fetch weights into ./models/
+./run.sh qwen38-flash-next-solo-hibrid   # our best model: image build + weights download +
+                                         # checkpoint self-conversion + serve — ONE command
+```
+
+That recipe is the house champion: **Qwen3.8-Flash-Next (176B multimodal MoE) on a single DGX Spark at
+50–57 tok/s on code** — faster than the publisher's own hosting — via a custom-quantized checkpoint
+(“hibrid45”) the recipe builds for itself on first boot. Its `README.md` tells the whole story.
+
+The general shape, for any recipe:
+
+```bash
+./download.sh <hf-id>                  # fetch weights into ./models/ (run.sh also does this when needed)
 ./build-and-copy.sh <recipe>           # build the recipe's image, copy it to the other cluster nodes
 ./run.sh <recipe>                      # launch: model + proxy + tunnel (TP across the cluster)
 ```
 
 The scripts self-bootstrap their own `.venv` on first use. The folder name **is** the recipe.
+
+## Measured on the reference box (DGX Spark GB10, clean decode windows)
+
+| recipe | model | boxes | speed | KV pool |
+|---|---|---|---|---|
+| `qwen38-flash-next-solo-hibrid` | Qwen3.8-Flash-Next 176B (VLM, thinks) | 1 | **50–57 tok/s code · ~32 avg** | ~800k tok @262k ctx |
+| `deepseek-v4-flash-0731` | DeepSeek-V4-Flash 304B (thinks) | 2 | ~40–50 tok/s (re-measure pending) | 620k tok @300k ctx |
+| `holo-3.1-35b` | Holo-3.1-35B-A3B (vision) | 1 | ~75 tok/s flat | 3.4M tok @131k ctx |
+| `flux2-dev` | FLUX.2-dev (images) | 1 | ~45s / 1024² warm | — |
+
+Speeds are honest numbers: sustained bands and clean single-stream averages, not cherry-picked peaks.
 
 ---
 
@@ -30,17 +52,28 @@ models/                                  ← weights, gitignored, mounted into t
 ## A recipe: `recipes/<name>/myllmbox.yaml`
 
 ```yaml
-vllm:
+server:
   image: mbx-<name>                    # image to run (mbx-<name> from the recipe Dockerfile, or any tag/hub image)
-  entrypoint: vllm                     # optional: override the image's entrypoint (→ `vllm serve`)
+  entrypoint: vllm                     # optional: override the image's entrypoint (→ `vllm serve`);
+                                       #   recipes with first-boot work point it at their own wrapper script
   model: /models/org/name              # a local /path (offline) OR an HF id (downloads to the cache)
-  gpu_memory_utilization: 0.8
+  cache: recipes/<name>/.data/cache    # optional persistent host dir → /cache (compile caches, quant caches,
+                                       #   autotune configs — later boots skip the first-boot cost)
+  cpuset: "5-9,15-19"                  # optional --cpuset-cpus pin (e.g. the GB10 performance cores)
   env:                                 # name: value → -e NAME=value into the container
     HF_HUB_OFFLINE: "1"
-  extra_args:                          # human-readable flags, NOT an alternating list:
+  vllm:                                # vLLM CLI flags — a human-readable dict, NOT an alternating list:
     tensor-parallel-size: 2            #   name: value  → --name value
     trust-remote-code: true            #   name: true   → --name   (bare flag)
     kv-cache-dtype: fp8                #   name: false/null → omitted
+  # sglang: {...}                      # a non-empty flag dict here = SGLang mode (launch_server) instead of vLLM
+  # command: "python3 -m my_server"    # or: run ANY OpenAI-compatible server (image/video boxes use this)
+
+quantize:                              # OPTIONAL: the model above is DERIVED — run.sh builds it when missing
+  source: /models/org/source-ckpt      #   source downloaded first if absent
+  script: make-<name>.sh               #   recipe-local converter (checkpoint surgery), or omit `script`
+                                       #   to use the generic quantizer (nvfp4/mxfp8)
+  out: /models/myllmbox/<derived-name>
 
 cluster:                               # OMIT for single-node. Present = serve ONE model across these boxes.
   boxes: [box1, box2]                  #   names defined in cluster.yaml (host/interconnect/iface/ib_hca/
@@ -51,7 +84,8 @@ dashboard: sparkdash                   # OPTIONAL web UI → dashboards/sparkdas
                                        #   Any UI is your taste (mia/sparkDash, a robot, your own).
 ```
 
-`extra_args` is a **dict** (readable), not a list. `true` → bare flag; a value → `--name value`; `false`/null → skipped.
+The `vllm:` flags block is a **dict** (readable), not a list. `true` → bare flag; a value → `--name value`;
+`false`/null → skipped.
 
 **The dashboard is a pattern, not a product.** `dashboard: <name>` points at `dashboards/<name>/` (its own
 `up.sh`/`down.sh` + a `dashboard.yaml` giving the `port`). The proxy then routes `/v1/*` to the model and
@@ -88,14 +122,17 @@ box during build. Before `build-and-copy`/`run`, check:
 - **`image:`** — where it comes from (a hub image runs on trust; prefer building from a `Dockerfile` you can read).
 - **`mounts:`** — which host paths it exposes into the container.
 - the **`Dockerfile`** — what it fetches/executes.
-- **`cluster.nodes`** — set these to *your* interconnect IPs and `nccl_ifname`/`nccl_ib_hca`; someone else's
-  values won't match your hardware.
+- **`cluster.boxes`** — box names resolve through *your* `cluster.yaml` (hosts, interconnect IPs, ifaces),
+  so a downloaded recipe never carries someone else's addresses — but make sure your `cluster.yaml` boxes
+  match your hardware before running a multi-box recipe.
 
 ## What `run.sh` does
 1. bootstrap `.venv` (aiohttp, pyyaml, click, python-dotenv)
 2. build `mbx-base` once (the base box) if a recipe Dockerfile `FROM mbx-base` needs it
 3. build `mbx-<recipe>` from `recipes/<recipe>/Dockerfile` if present
-4. `runner.cli up` — start the model (single-node or cluster), then the keepalive proxy + cloudflared tunnel
+4. resolve the model: a missing `/models/myllmbox/*` model with a `quantize:` block triggers `./quantize.sh`
+   (source downloaded if absent, then the recipe's converter builds the derived checkpoint)
+5. `runner.cli up` — start the model (single-node or cluster), then the keepalive proxy + cloudflared tunnel
 
 **Single node** = the degenerate case of a cluster with one node. **Multi-node** (`cluster:` with ≥2 nodes):
 the runner runs the head locally and `ssh`'s a `--headless` worker onto each other node, one tensor-parallel
