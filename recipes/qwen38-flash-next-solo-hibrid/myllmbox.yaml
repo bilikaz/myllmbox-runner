@@ -78,4 +78,12 @@ server:
     reasoning-parser: qwen3
     speculative-config: '{"method":"mtp","num_speculative_tokens":3}'   # K=3 (current champion setting)
 
+# run.sh's model pipeline: a missing /models/myllmbox/* model triggers ./quantize.sh, which reads this —
+# source gets downloaded if absent, then the recipe-local converter builds the hibrid checkpoint.
+# (NOT the generic quantizer: this is checkpoint surgery, not weight quantization — hence `script`.)
+quantize:
+  source: /models/Inferact/Qwen3.8-Flash-Next-NVFP4
+  script: make-hibrid.sh
+  out: /models/myllmbox/Qwen3.8-Flash-Next-hibrid
+
 dashboard: sparkdash

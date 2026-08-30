@@ -37,6 +37,7 @@ vals = dict(
     SRC=q.get("source") or "", FMT=fmt, MTYPE=q.get("model_type") or "diffusion",
     TARGET=q.get("target") or "transformer", SKIP=q.get("skip_modules") or "",
     OUT=q.get("out") or "", MODELS=(cfg.get("server") or cfg.get("vllm") or {}).get("models_dir") or "models",
+    SCRIPT=q.get("script") or "",
 )
 for k, v in vals.items():
     print(f"{k}={shlex.quote(str(v))}")
@@ -49,6 +50,13 @@ SRC_ID="${SRC#/models/}"
 if [ ! -d "$MODELS/$SRC_ID" ] || [ -z "$(ls -A "$MODELS/$SRC_ID" 2>/dev/null)" ]; then
   echo "· source $SRC_ID not present → downloading"
   ./download.sh "$SRC_ID"
+fi
+
+# recipe-local converter (quantize.script): a model DERIVED by the recipe's own script rather than the
+# generic quantizer (e.g. the hibrid's checkpoint surgery). Source is already ensured above.
+if [ -n "${SCRIPT:-}" ]; then
+  echo "· recipe-local converter: $D/$SCRIPT"
+  exec "$D/$SCRIPT"
 fi
 
 IMG=mbx-quantizer
