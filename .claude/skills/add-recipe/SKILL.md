@@ -90,6 +90,12 @@ and refuses on mismatch — so pin the same stack in the recipe `Dockerfile` as 
 - Our own build (the norm for SM121/GB10 quirks and for generic servers): `Dockerfile` in the recipe
   folder — `run.sh` builds it as `mbx-<name>` automatically (`FROM mbx-base` for the vLLM stack, or
   its own stack for generic servers).
+- **MANDATORY: if `image:` is any `mbx-*` (non-default, non-hub) image, THIS folder must contain the
+  Dockerfile that builds it, named `mbx-<this-folder>`** — never point at another recipe's `mbx-*`
+  image. A fresh user runs `./run.sh <name>`, hits "image not found", and has no way to know the image
+  is born in a different folder — they'll conclude the recipe is broken. If two recipes need the same
+  image content, COPY the Dockerfile into each folder (duplication is fine; cross-recipe image
+  dependencies are not).
 - **Review anything downloaded** before building/running — a recipe can do anything to the box.
 
 ## 6 · Write it, then verify for real

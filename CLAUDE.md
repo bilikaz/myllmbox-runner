@@ -19,6 +19,7 @@ required fields beyond `vllm.model`, no sanitising. Whatever you put in flows st
   `--node-rank`/`--tp` on a cluster) instead of `vllm serve`. Same mapping rules as the vLLM dict; same
   proxy/tunnel front (sglang serves `/v1/*` + `/health`). See `recipes/qwen38-flash-next-sglang/`.
 - **`vllm.mounts`** — extra `host:container` binds, raw.
+- **`server.cpuset`** — optional `--cpuset-cpus` pin (e.g. `"5-9,15-19"` = GB10 performance cores).
 - **`cluster`** — presence turns on multi-node; absence = single node. You define the nodes.
 - **`dashboard: <name>`** — OPTIONAL web UI → `dashboards/<name>/` (its own `up.sh`/`down.sh` + a `dashboard.yaml`
   giving `port`). The proxy sends `/v1/*` to the model and **every other path** to `127.0.0.1:port`;
