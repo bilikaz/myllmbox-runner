@@ -2,7 +2,7 @@
 
 Our own SM121 build (vLLM `20260803.dev0`, jasl PR #41834, ~v0.26-era). MoE = **Marlin** (the compact-fp4 path
 is NOT reachable here — that's the SM121 tax). 2× DGX Spark GB10, TP=2. Same-schema companion:
-`recipes/deepseek-v4-flash/reports.md` (B12X).
+`experiments/deepseek-v4-flash/reports.md (retired lane)` (B12X).
 
 ## Config
 - image `mbx-deepseek-v4-flash-0731` · model `DeepSeek-V4-Flash-0731`
