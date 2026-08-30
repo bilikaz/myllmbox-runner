@@ -29,9 +29,16 @@ The same scene specs extend to video models later (the MOTION sections become li
 
 ## Resolution tiers (image models — exact same on every model)
 
-- **Speed tier: 1280×720.** The quoted seconds-per-image = the 3-seed average at 720p.
-- **Results tier: 2560×1440 (QHD).** The showcase renders / committed winners.
-- Note: changing resolution re-rolls the composition (new noise grid), so the tiers are separate
+Speed is measured at ALL THREE standard resolutions, each as the 3-seed average:
+
+| tier | size |
+|---|---|
+| HD | 1280×720 |
+| FHD | 1920×1080 |
+| QHD | 2560×1440 |
+
+- **Results/showcase tier: QHD** — the committed `tests/` winners are picked from the QHD runs.
+- Note: changing resolution re-rolls the composition (new noise grid), so tiers are separate
   runs, not rescales. Qwen-Image-Edit quirk: avoid exactly 1024×1024 (the one known trap size —
   breaks only when output==input size AND a dim is exactly 1024).
 

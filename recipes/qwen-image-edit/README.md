@@ -5,6 +5,19 @@ Spark (GB10/SM121), served as a **pre-quantized NVFP4** checkpoint with the 4-st
 Ported from the old eugr on-the-fly recipe (`x/qwen-image-edit-2511.yaml`) into our `recipes/` structure with
 a pre-quant step (like `flux2-dev`) so it boots instantly — no BF16 peak, no JIT stall.
 
+## Measured (2026-08-30, GB10, 8 steps + Lightning, avg of the 3 canonical seeds)
+
+| tier | size | seconds / edit |
+|---|---|---|
+| HD | 1280×720 | **~21s** |
+| FHD | 1920×1080 | **~37s** |
+| QHD | 2560×1440 | **~67s** |
+
+First request at each NEW size pays a one-time Triton compile stall (~1–2 min, `COMPILE_BLOCKS=1`);
+the numbers above are warm. Timing/quality protocol: `bench/README.md` (gauntlet, canonical seeds
+123123123/456456456/789789789, QHD = the showcase tier — winners in `tests/`). The one trap size:
+avoid exactly 1024×1024 (breaks only when output==input size AND a dim is exactly 1024).
+
 ## Run it
 
 ```bash
