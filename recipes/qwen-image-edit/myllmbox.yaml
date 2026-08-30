@@ -27,7 +27,6 @@ server:
 
   env:
     MODEL_PATH: /models/myllmbox/Qwen-Image-Edit-2511-nvfp4   # load the pre-quant directly
-    QUANT_PRELOADED: "1"
     QUANT_CACHE_DIR: /cache/quant                            # legacy on-the-fly fallback caches HERE, not models/
                                                              # (models/.cache/* was the old design's dumping ground)                                      # → server.py loads it as-is (no on-the-fly quant, no BF16 peak)
     SERVED_MODEL_NAME: Qwen/Qwen-Image-Edit-2511

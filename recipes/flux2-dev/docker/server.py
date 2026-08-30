@@ -83,7 +83,9 @@ from diffusers import DiffusionPipeline
 # back-compat alias for nvfp4.)
 TORCHAO_QUANT = (os.environ.get("TORCHAO_QUANT")
                  or ("nvfp4" if os.environ.get("TORCHAO_NVFP4") else "")).lower()
-if os.environ.get("QUANT_PRELOADED"):
+# AUTODETECTED: our quantizer stamps every pre-quant with myllmbox-quant.json — its presence,
+# not an env knob, decides the loading path. (QUANT_PRELOADED env kept as a manual override.)
+if os.environ.get("QUANT_PRELOADED") or os.path.exists(os.path.join(MODEL_PATH, "myllmbox-quant.json")):
     # Already quantized offline by ./quantize.sh (MODEL_PATH = models/myllmbox/<name>-<fmt>). Load the
     # quantized transformer with use_safetensors=False (torchao is pickled .bin) but let the rest of the
     # pipeline (text_encoder/vae — safetensors) load normally. Loading the WHOLE pipeline with
