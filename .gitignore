@@ -12,3 +12,4 @@ cluster.yaml
 dashboards/*/.data/
 recipes/*/.data/
 experiments/
+bench/results/
