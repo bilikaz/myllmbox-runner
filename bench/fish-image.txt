@@ -1,17 +1,44 @@
-An underwater scene in a clean flat-illustration style (no photorealism, no text anywhere in the
-image).
+Generate a single image of an underwater scene, in a clean flat-illustration style. No
+photorealism. No text, letters, numbers, labels, logos or watermarks anywhere in the image.
 
-WATER & FLOOR: a water gradient — lighter blue near the surface at the top, deepening to darker
-blue toward the bottom. A sandy/rocky seafloor band in tan and brown along the bottom of the frame.
+HARD REQUIREMENTS — the image must show ALL of them:
 
-FISH — exactly 2 fish, both fully visible, clearly different from each other:
-- One fish clearly LARGER, with a round/short body; one clearly smaller with a long slender body.
-- Different colors from each other.
-- Each fish must read unmistakably as a fish: a body, a triangular tail at the rear, at least one
-  fin (dorsal or side), exactly 1 visible eye with a pupil, and a small mouth.
+CANVAS / COMPOSITION
+- Scene filling the whole frame, nothing important cropped at the edges.
+- Water gradient background: lighter blue near the top (the surface), darker blue near the bottom
+  (the depths).
+- A sandy or rocky seafloor along the bottom (~10–15% of the frame), in tan/beige/brown.
 
-DETAILS: a stream of round bubbles of varying sizes rising toward the surface; at least 2 green
-seaweed plants rooted on the seafloor, drawn as wavy vertical fronds.
+FISH — exactly 2 fish, both fully visible, visibly different from each other. Each fish must be
+RECOGNIZABLE as a fish without any text label.
 
-Soft light filtering from above, calm friendly aquarium mood, crisp shapes, flat colors with simple
-shading.
+Required features for EACH fish:
+- A body (oval, teardrop, or simple fish shape).
+- A triangular tail at the rear.
+- At least 1 fin (top dorsal fin OR side fin OR both).
+- Exactly 1 visible eye (with a pupil).
+- A mouth indication (small line, curve, or open shape).
+
+The two fish must be visually distinct:
+- Different colors.
+- Different sizes (one clearly larger than the other).
+- Different overall body shape (e.g., one round/short, one long/slender).
+
+BUBBLES
+- Streams of round bubbles rising toward the surface.
+- Bubbles vary in size.
+
+SEAWEED / PLANTS
+- At least 2 green seaweed plants rooted on the seafloor.
+- Each seaweed is a vertical wavy frond or a stack of overlapping leaf shapes suggesting a plant.
+
+MOTION (conveyed in the still image — how is up to you)
+- Both fish are swimming horizontally, each heading at its own pace.
+- The bubbles are rising.
+- The seaweed sways gently.
+
+STYLE / QUALITY
+- Clean flat-illustration / vector-art style: crisp shapes, flat colors, simple shading.
+- Soft light filtering down from the surface, calm friendly mood.
+- High-resolution HD render: sharp clean edges, no blur, no artifacts, no distorted anatomy,
+  masterpiece-quality illustration, 4K detail.
