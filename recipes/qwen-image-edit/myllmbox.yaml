@@ -43,9 +43,8 @@ server:
     # Lightning config (base/max shift ln(3)) — parity in A/B at working resolutions. Keeping stock as tested.
     LIGHTNING_SCHEDULER: "0"
 
-    # COMPILE_BLOCKS=1: fastest steady-state, but each NEW image shape pays a one-time Triton JIT stall
-    # (~1-2 min). Set "0" for varied sizes / no stalls (~10-15% slower per image).
-    COMPILE_BLOCKS: "1"
+    TORCHINDUCTOR_CACHE_DIR: /cache/inductor                 # persist the block-compile JIT across boots
+                                                              # (compile always on; one ~1-2 min JIT per NEW size, then cached)
 
     # size=auto edit target area (px). THE 1024 TRAP (exact, verified): edits break ONLY when the output
     # size equals the input size AND a dimension is exactly 1024 — nudge any dim to escape. All other sizes

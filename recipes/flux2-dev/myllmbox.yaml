@@ -24,7 +24,9 @@ server:
     QUANT_CACHE_DIR: /cache/quant                            # legacy on-the-fly fallback caches HERE, not models/
                                                              # (models/.cache/* was the old design's dumping ground)                                 # → server.py loads it as-is (no on-the-fly quant)
     SERVED_MODEL_NAME: black-forest-labs/FLUX.2-dev
-    COMPILE_BLOCKS: "0"                                  # first bring-up: skip Triton block-compile (too slow on FP4); re-enable for perf
+    TORCHINDUCTOR_CACHE_DIR: /cache/inductor            # persist the block-compile JIT across boots
+                                                         # (compile is always on — the FP4 speed IS the compiled path;
+                                                         # each new output size JITs once, then it's cached here)
     DEFAULT_STEPS: "28"
     DEFAULT_GUIDANCE: "4.0"
     HF_HUB_OFFLINE: "1"
