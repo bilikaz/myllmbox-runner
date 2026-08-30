@@ -1,8 +1,9 @@
 """Config: CLI > env > YAML > defaults. Secrets (TUNNEL_TOKEN, BINDING_TOKEN) come from .env/env only.
 
-TUNNEL_TOKEN is required — it is the whole binding (the platform provisioned the tunnel + DNS at token
-mint; the runner just connects). BINDING_TOKEN is OPTIONAL by decision: absent means the user chose an
-all-public box, generation included — say so loudly, never silently.
+TUNNEL_TOKEN is OPTIONAL by decision: it is the whole binding (the platform provisioned the tunnel +
+DNS at token mint; the runner just connects) — but absent means the user chose a LOCAL-ONLY box (no
+cloudflared, no public URL; LAN proxy/direct ports only) — say so loudly, never silently. BINDING_TOKEN
+is OPTIONAL by the same rule: absent means an all-public box, generation included — also said loudly.
 """
 from __future__ import annotations
 
@@ -196,7 +197,13 @@ def load(cli: dict[str, Any] | None = None, env: dict[str, str] | None = None, y
         cfg = deep_merge(cfg, {k: v for k, v in cli.items() if v is not None})
 
     if not cfg["tunnel_token"]:
-        raise SystemExit("TUNNEL_TOKEN is required — copy it from the console's Box setup reveal into .env")
+        # LOCAL-ONLY mode (deliberate choice — e.g. a box that should not be visible online): no
+        # cloudflared is started; the serve is reachable only on the LAN (proxy :8011, direct :8000).
+        # Loud, never silent — a production lane that EXPECTS a tunnel must notice this line.
+        log.warning(
+            "no TUNNEL_TOKEN in .env — starting WITHOUT a tunnel (LOCAL-ONLY box: "
+            "proxy :%s on this machine, no public URL)", cfg["proxy"]["port"],
+        )
     if not cfg["binding_token"]:
         # the user's explicit choice, but it must never be a silent one
         log.warning("no BINDING_TOKEN — the box will be FULLY PUBLIC, generation included")

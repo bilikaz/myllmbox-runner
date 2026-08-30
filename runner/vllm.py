@@ -39,6 +39,10 @@ def run_args(cfg: dict[str, Any], node_rank: int = 0, nnodes: int = 1, master_ad
     args = ["docker", "run", "-d", "--name", CONTAINER, "--gpus", str(v["devices"]), "--ipc=host", "--cap-add", "SYS_PTRACE"]
     # multi-node NCCL needs host networking (nodes talk over the ConnectX link); single-node maps a port.
     args += ["--network", "host"] if multi else ["-p", f"127.0.0.1:{v['port']}:{v['port']}"]
+    # optional CPU pinning (server.cpuset, e.g. "5-9,15-19" = GB10 performance cores — MiaAI's dual-Spark
+    # recipe pins these; keeps the scheduler/tokenizer off the efficiency cores).
+    if v.get("cpuset"):
+        args += ["--cpuset-cpus", str(v["cpuset"])]
     if v.get("runtime"):
         args += ["--runtime", str(v["runtime"])]
     local_model = str(v["model"]).startswith("/")

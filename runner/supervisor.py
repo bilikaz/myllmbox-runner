@@ -115,16 +115,20 @@ def up(cfg: dict[str, Any]) -> None:
         except Exception as e:  # noqa: BLE001 — the dashboard is OPTIONAL; never let it block the model serve
             log.warning("dashboard '%s' failed to start (%s) — serving the model WITHOUT it", dashboard.name(cfg), e)
     proxy = _spawn_proxy(cfg, dash_up)
-    tun = tunnel.spawn(cfg, STATE / "cloudflared.log")
+    # LOCAL-ONLY mode: no TUNNEL_TOKEN → no cloudflared (config.py already warned loudly).
+    tun = tunnel.spawn(cfg, STATE / "cloudflared.log") if cfg.get("tunnel_token") else None
     cluster = cfg.get("cluster") or {}
     _write_running({                                 # ONE manifest of what's up → `down`/`status` read it
         "proxy_pid": proxy.pid,
-        "tunnel_pid": tun.pid,
+        "tunnel_pid": tun.pid if tun else None,      # None survives down()'s _pid_alive (returns False)
         "cluster": cluster if len(cluster.get("nodes") or []) > 1 else {},   # so `down` stops the workers too
         "dashboard": dashboard.name(cfg) if dash_up else "",                 # so `down` runs its down.sh (only if it came up)
     })
     wait_healthy(cfg)
-    log.info("box is up — proxy :%s, tunnel connected (see .mbx/*.log)", cfg["proxy"]["port"])
+    if tun:
+        log.info("box is up — proxy :%s, tunnel connected (see .mbx/*.log)", cfg["proxy"]["port"])
+    else:
+        log.info("box is up — proxy :%s, LOCAL-ONLY (no TUNNEL_TOKEN, no public URL)", cfg["proxy"]["port"])
 
 
 def down() -> None:
