@@ -215,7 +215,9 @@ def main() -> None:
     os.unlink(f"{DST}/config.json")
     json.dump(cfg, open(f"{DST}/config.json", "w"), indent=1)
 
-    os.system(f"chmod -R a+r {DST}")
+    # ug+rwX: owner AND group can edit/delete the output (a box is often multi-user); o+rX keeps it
+    # world-readable for serving. X = execute only on directories.
+    os.system(f"chmod -R ug+rwX,o+rX {DST}")
     # first-boot conversion runs as root in the serve container — hand the output to whoever owns
     # the /models mount so the host user can manage it (flux2 quantizer lesson: root-owned outputs).
     try:
