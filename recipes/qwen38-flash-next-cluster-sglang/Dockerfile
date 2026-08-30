@@ -1,4 +1,4 @@
-# mbx-qwen38-flash-next-solo-sglang — SGLANG LANE v2 (2026-08-29): the stock qwen38flashnext sglang
+# mbx-qwen38-flash-next-cluster-sglang — DUAL SGLANG LANE (same patch set as solo-sglang; own folder per house rule) (2026-08-29): the stock qwen38flashnext sglang
 # image + the FULL DSpark SM121 kernel set from MiaAI-Lab/Qwen3.8-Flash-Next-Dual-DGX-Sparks (MIT,
 # measured 64.4 tok/s single-stream TP=2 on 2x Spark) + our MBX_PLE_MMAP NVMe-table patch.
 #

@@ -1,52 +1,100 @@
-# Qwen3.8-Flash-Next — SINGLE Spark (box1), Inferact NVFP4 + PLE-from-disk. Solo variant of
-# recipes/qwen38-flash-next-sglang (see its README.md for the full experiment log): main weights are only
-# 73.3 GiB total (measured) and the 95.4 GiB bf16 n-gram table pages from NVMe, so ONE box holds it —
-# no cluster block → no cross-node NCCL per token (the prime suspect for the dual-node ~12 tok/s floor;
-# single-Spark llama.cpp does 22-27). Frees box2 entirely. NEXTN stays off (sglang can't load Inferact's
-# nvfp4 MTP experts — see the dual recipe). Uses the SAME patched image + same warm kernel cache.
+# Qwen3.8-Flash-Next — SOLO SGLANG LANE v2 (2026-08-29): RadixArk NVFP4 + NEXTN spec + NVFP4 KV,
+# one Spark, PLE table from NVMe via MBX_PLE_MMAP.
+#
+# WHY THIS EXISTS (v1 retired 2026-08-27 with spec broken; everything below is what changed):
+#   MiaAI-Lab/Qwen3.8-Flash-Next-Dual-DGX-Sparks measured 64.4 tok/s single-stream on 2 Sparks with
+#   working NEXTN (3 steps / topk 1 / 4 draft tokens) — the RadixArk checkpoint's BF16 MTP head is the
+#   piece sglang's draft loader can eat (Inferact's NVFP4 head was the v1 killer). Her SM121 kernel set
+#   (sglang#36806+#36845 + NVFP4 KV) is baked into THIS folder's image.
+#   THE BET (solo): sglang's CUDA-graphed NEXTN loop has no per-draft-step metadata rebuild — vLLM's
+#   costs us ~23% at K=3. Solo ceiling is still bandwidth (RadixArk step path = nvfp4 experts + BF16
+#   dense, same ~8.5 GiB/step class as Inferact): expect ~10-12 steps/s; the drafter efficiency is the
+#   experiment. Honest target: beat vLLM-hibrid's 46.9 peak on code. 60+ needs TP=2 (her dual config).
+#
+# SOLO FIT (RadixArk 135.25G total = 68G nvfp4 experts + 52G fp8 PLE table + 16G bf16 dense):
+#   GPU pool: 68+16 = 84G weights; table -> NVMe (MBX_PLE_MMAP; sglang's own offload PINS 52G of host
+#   RAM = same UMA pool = does not fit solo). RadixArk's table is fp8 AT REST -> the adoption loader
+#   zero-copies the checkpoint's own safetensors mmap: no bank file, no copy, half the page-in bytes
+#   of Inferact's bf16 table. mem-fraction 0.85: 0.85 x 121.7 ~= 103G pool - 84G = ~19G KV+mamba+
+#   workspace (NVFP4 KV is ~3.1x dense, so this is generous). Raise toward 0.88 only after a clean
+#   boot + long-context probe (her QSA indexer workspace warning: fp32 [chunk x history] transient).
+#
+# RUN: ./build-and-copy.sh qwen38-flash-next-solo-sglang && ./run.sh qwen38-flash-next-solo-sglang
+#   (runs on the box you launch from; box1 currently holds the vLLM hibrid champion — decide first)
+# QUALITY GATE MANDATORY — DOUBLY SO: source-trust history says MiaAI ships throughput-first (her
+#   08-27-era box FAILED our killer prompt with garbage at full speed; her current repo NIAH-validates
+#   the token-0 fix, but OUR pasture render on OUR boot is the only proof we accept). If her Triton QSA
+#   kernel's numerics disappoint, the fallback direction is tonyd2wild's guard-extension (real TRT-LLM
+#   QSA kernel) — which then needs its own long-context validation (sglang#36537 = token-0 on GB10).
+# Judge speed by DRAFTED throughput as always. vLLM-hibrid baseline: 44-46 sustained / 46.9 peak code.
 
 server:
-  image: mbx-qwen38-flash-next-solo-sglang      # built from THIS folder's Dockerfile (QSA SM121 patch + PLE
-                                                # file-backed patch). Keep Dockerfile+qsa_fa_fallback.py in
-                                                # sync with recipes/qwen38-flash-next-sglang (same content;
-                                                # docker layer cache dedups the actual image).
-  model: /models/Inferact/Qwen3.8-Flash-Next-NVFP4
-  cache: recipes/qwen38-flash-next-sglang/.data/cache   # shared with the dual recipe → kernels already warm
+  image: mbx-qwen38-flash-next-solo-sglang      # built from THIS folder's Dockerfile
+  model: /models/RadixArk/Qwen3.8-Flash-Next-NVFP4
+  cache: recipes/qwen38-flash-next-solo-sglang/.data/cache   # own lane: fresh triton/flashinfer JIT caches
+  cpuset: "5-9,15-19"                           # GB10 performance cores (MiaAI pins these; runner passes
+                                                # --cpuset-cpus — keeps scheduler off the efficiency cores)
 
   env:
     HF_HUB_OFFLINE: "1"
     TRANSFORMERS_OFFLINE: "1"
     HF_HUB_DISABLE_XET: "1"
-    TRITON_CACHE_DIR: /cache/triton
-    FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
-    TILELANG_CACHE_DIR: /cache/tilelang
     TORCH_CUDA_ARCH_LIST: "12.1a"
     FLASHINFER_CUDA_ARCH_LIST: "12.1a"
+    TRITON_CACHE_DIR: /cache/triton
+    FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
+    OMP_NUM_THREADS: "10"                       # MUST match the cpuset width (10 pinned cores) — more
+                                                # threads than cores = context-switch thrash. A/B option:
+                                                # drop cpuset AND set 15 (the vLLM-lane-proven combo,
+                                                # threads roam all 20 cores incl. efficiency ones)
     MBX_PLE_MMAP: "1"                           # PLE from disk — never disable (house rule)
+    MBX_STRIP_SPEC_BREAKERS: "1"                # vLLM-style tolerance: drop logprobs/top_logprobs at the
+                                                # door instead of letting them SILENTLY disable NEXTN for
+                                                # that request (Dockerfile patch 6; logs what it strips)
 
   sglang:
     served-model-name: Qwen/Qwen3.8-Flash-Next
-    ple-offload-embedding: true                 # REQUIRED for the disk-PLE: the mmap patch lives inside the
-                                                # offload wrapper. Missing it = 95G table loads into the GPU
-                                                # pool = OOM SIGKILL at init (measured twice, 2026-08-27).
+    trust-remote-code: true
     quantization: modelopt_fp4
-    fp4-gemm-backend: flashinfer_cutlass
-    context-length: 262144
-    # 0.89×122.5 ≈ 109G pool − ~74G weights → ~35G KV+mamba on one box (PLE on NVMe):
-    mem-fraction-static: 0.93
-    # no ep (single GPU); tp defaults to 1
-    chunked-prefill-size: 16384                 # VLM ≥16k house rule
+    attention-backend: flashinfer               # trtllm_mha is SM100-only; SM121 fast paths auto-fall-back
+    fp4-gemm-backend: flashinfer_cutlass        # v1-proven on SM121 (her script leaves auto; keep explicit)
+    page-size: 64                               # pinned by SGLang for compressed QSA addressing
+    context-length: 262144                      # native (no YaRN; house policy caps 1M monsters at 300k)
+    mem-fraction-static: 0.90                   # see SOLO FIT above; PLE is NOT in this budget here (NVMe)
+    chunked-prefill-size: 4096                  # her model-card value @ native ctx. QSA indexer materializes
+                                                # an fp32 [chunk x history] transient per sparse layer —
+                                                # 16k chunks wedged her boxes; do NOT raise without profiling
+    max-running-requests: 6                     # solo parity with the vLLM lanes
+    # NEXTN speculative decoding — draft = the checkpoint's own BF16 mtp.* tensors (nothing extra):
+    speculative-algorithm: NEXTN
+    speculative-num-steps: 3                    # 3/1/4 = her validated chain; topk must stay 1 (qwen4_exp)
+    speculative-eagle-topk: 1
+    speculative-num-draft-tokens: 4
+    kv-cache-dtype: bfloat16                    # SOLO SPEED PICK: at budget-2048 QSA the KV bytes/step are
+                                                # negligible — dtype here is pure CONVERSION overhead:
+                                                # bf16 = none, fp8 = in-kernel upcast, nvfp4 = Triton
+                                                # compaction + dequant per QSA layer per step. bf16 still
+                                                # pools ~600k tokens in our slack (6x100k ctx). A/B ladder:
+    # kv-cache-dtype: fp8_e4m3                  #   balanced: half bytes, near-free upcast (#36845 kernel)
+    # kv-cache-dtype: nvfp4                     #   capacity king (~3.1x, NIAH-clean 128k) — the DUAL pick
+    num-continuous-decode-steps: 3              # N decode iters per scheduler pass — cuts the per-step
+                                                # Python/scheduler overhead (exactly where sglang trails
+                                                # vLLM); 2 proved stable with NEXTN (~9.0 steps/s), now 3
+    # linear-attn-decode-backend: flashinfer    # TESTED 2026-08-29, REVERTED SAME NIGHT: FlashInfer GDN
+                                                # decode DOES load on SM121 (decode=FlashInferGDNKernel,
+                                                # packed_decode=False) but the pasture gate caught TOKEN-0
+                                                # CORRUPTION — coherent thinking, then endless "!!!!!"
+                                                # (the sglang#36537 signature) mid-generation. GDN state
+                                                # numerics on GB10 = broken in this kernel; this is almost
+                                                # certainly WHY Mia defaults SM121 to Triton. Do not
+                                                # re-enable without a full gate pass on a newer image.
     mamba-ssm-dtype: bfloat16
-    # kv-cache-dtype: fp8_e4m3   # house pref, but UNTESTED with the Triton QSA kernel (the CuTe fallback
-    #                            # asserted on fp8 K). First light = bf16 (proven dual config); A/B fp8 after.
-    disable-radix-cache: true
-    # the mamba pool fix (see dual recipe README — starved pool = crashes/corruption):
-    max-mamba-cache-size: 97
-    mamba-scheduler-strategy: extra_buffer
-    mamba-track-interval: 64
-    max-running-requests: 6
-    sampling-backend: pytorch
-    disable-cuda-graph-padding: true
-    reasoning-parser: auto
+    mamba-radix-cache-strategy: extra_buffer    # must stay extra_buffer at page 64
+    mamba-track-interval: 64                    # multiple of page size, >= draft 4
+    disable-prefill-cuda-graph: true            # SM121 house rule: prefill graphs unreliable on GB10
+    disable-cuda-graph-padding: true            # v1-proven graph-pool relief; decode graphs stay ON
+    sampling-backend: pytorch                   # v1-proven on SM121
+    reasoning-parser: auto                      # auto = from the chat template (thinking stays ON — house)
+    tool-call-parser: auto
 
 dashboard: sparkdash
