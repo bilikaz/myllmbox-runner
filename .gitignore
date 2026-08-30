@@ -11,3 +11,4 @@ cluster.yaml
 # regenerated machine-specific config (box IPs, ssh users), any generated key. Never committed.
 dashboards/*/.data/
 recipes/*/.data/
+experiments/
