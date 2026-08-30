@@ -1,11 +1,11 @@
-# deepseek-v4-flash-0731 — benchmark report (Marlin build)
+# deepseek-v4-flash — benchmark report (Marlin build)
 
 Our own SM121 build (vLLM `20260803.dev0`, jasl PR #41834, ~v0.26-era). MoE = **Marlin** (the compact-fp4 path
 is NOT reachable here — that's the SM121 tax). 2× DGX Spark GB10, TP=2. Same-schema companion:
 `experiments/deepseek-v4-flash/reports.md (retired lane)` (B12X).
 
 ## Config
-- image `mbx-deepseek-v4-flash-0731` · model `DeepSeek-V4-Flash-0731`
+- image `mbx-deepseek-v4-flash` · model `DeepSeek-V4-Flash-0731`
 - `gpu-memory-utilization 0.89` · `kv-cache-dtype fp8_ds_mla` · `block-size 256`
 - `max-num-seqs 6` · `max-num-batched-tokens 12288`
 - spec: **dspark**, K=5, probabilistic · MoE: **Marlin** (auto) · `enable-expert-parallel`

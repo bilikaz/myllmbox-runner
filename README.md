@@ -28,7 +28,7 @@ The scripts self-bootstrap their own `.venv` on first use. The folder name **is*
 | recipe | model | boxes | speed | KV pool |
 |---|---|---|---|---|
 | `qwen38-flash-next` | Qwen3.8-Flash-Next 176B (VLM, thinks) | 1 | **50–57 tok/s code · ~32 avg** | ~800k tok @262k ctx |
-| `deepseek-v4-flash-0731` | DeepSeek-V4-Flash 304B (thinks) | 2 | ~40–50 tok/s (re-measure pending) | 620k tok @300k ctx |
+| `deepseek-v4-flash` | DeepSeek-V4-Flash 304B (thinks) | 2 | ~40–50 tok/s (re-measure pending) | 620k tok @300k ctx |
 | `holo-3.1-35b` | Holo-3.1-35B-A3B (vision) | 1 | ~75 tok/s flat | 3.4M tok @131k ctx |
 | `flux2-dev` | FLUX.2-dev (images) | 1 | ~45s / 1024² warm | — |
 
