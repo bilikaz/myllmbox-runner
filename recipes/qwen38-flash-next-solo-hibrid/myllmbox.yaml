@@ -1,32 +1,39 @@
-# Qwen3.8-Flash-Next HIBRID — Inferact NVFP4 experts + OUR block-FP8 dense projections, solo box.
-# THE THESIS (measured 2026-08-29): the validator step streams ~8.5 GiB/step, of which ~7 GiB is BF16
-# dense — the one slice no public checkpoint quantizes (verified: the official "FP8" ckpt quantizes
-# experts ONLY; dense is BF16 there and in Inferact/RadixArk). Converting the decode-path dense set
-# (~5.5 GiB -> ~2.8 GiB, GDN in_proj*/out_proj + QSA q/k/v/o + shared expert) cuts step bytes ~30% ->
-# projected ~13-15 steps/s = ~40 tok/s mixed / ~50 code at K=3, solo. lm_head/embeds/mHC/norms/vision/
-# MTP/PLE stay BF16 (mirrors Alibaba's own fp8 exclusions — the quality-sensitive set).
+# Qwen3.8-Flash-Next HIBRID45 — ============ CHAMPION (validated 2026-08-30) ============
+# Inferact NVFP4 experts + OUR NVFP4 dense EXCEPT attention (QSA q/k/v/o untouched bf16), solo box.
 #
-# OUT OF THE BOX (fresh user, three commands — the FIRST BOOT CONVERTS AUTOMATICALLY):
+# THE PRECISION MAP (why this split — measured, not guessed):
+#   experts                       nvfp4 (Inferact)  the bulk; tolerant
+#   GDN in/out + shared expert    nvfp4 (OURS)      0.97+0.11 GiB/step — multiplicative, tolerant
+#   QSA q/k/v/o                   bf16 SACRED       comparators: q.k dot products RANK tokens; 4-bit
+#                                                   noise flips rankings (hibrid4 lesson) and even
+#                                                   fp8 cost acceptance — bf16 BEAT the fp8 champion
+#                                                   on the paired prose A/B (2.55-3.04 vs 1.81-2.30)
+#   lm_head/embeds/MTP/PLE/norms  bf16              quality-critical set (Alibaba's own exclusions)
+#
+# SCOREBOARD (single Spark, K=3):
+#   hibrid45 (THIS):   13.2-13.6 steps/s, code 50-52 (peak 51.6+), prose accept 2.5-3.0 (beats fp8's
+#                      1.8-2.3 same-prompt); pasture-passed, "near identical to pre-compression".
+#   hibrid4 (retired): all-nvfp4 dense = 13.8 steps, PEAK 53.5 / 70.5 c=2 aggregate — intermittent
+#                      IQ drop (pasture defects, prose floor 2.08). Speed record only; do not serve.
+#   fp8 hibrid (old):  12.8 steps, code 46-50, peak 50.0 — superseded (this folder's git history).
+# Experiment trail: recipes/qwen38-flash-next-solo-test (uncommitted lane).
+#
+# OUT OF THE BOX (fresh user, three commands — FIRST BOOT CONVERTS AUTOMATICALLY):
 #   1. ./download.sh Inferact/Qwen3.8-Flash-Next-NVFP4          # the source checkpoint (~183G)
 #   2. ./build-and-copy.sh qwen38-flash-next-solo-hibrid        # the image (patches + converter inside)
-#   3. ./run.sh qwen38-flash-next-solo-hibrid                   # first boot builds the hibrid checkpoint
-#      (CPU-only ~5-10 min, once — entrypoint wrapper; later boots fast-skip). Manual pre-build still
-#      works too: ./recipes/qwen38-flash-next-solo-hibrid/make-hibrid.sh
-# ============================== CHAMPION — VALIDATED 2026-08-30 ==============================
-# THE fastest known single-box config for this model, pasture-gated: 12.8 steps/s, drafted 38.4,
-# code sustained 46-50, PEAK 50.0 tok/s (accept len 3.94/4). One Spark ≈ Alibaba's own 53 tok/s
-# hosting; beats every known community config short of a four-box GLM TP4. The stack: our fp8
-# dense (+30% steps) + CUTLASS block-fp8 (b12x tested = parity) + vendored b12x lm_head GEMV
-# (+5.5%) + K=3 MTP. Judge speed by DRAFTED throughput; gate any kernel change with the pasture.
+#   3. ./run.sh qwen38-flash-next-solo-hibrid                   # first boot builds the checkpoint
+#      (CPU-only ~5-10 min, once; later boots fast-skip). Manual pre-build:
+#      ./recipes/qwen38-flash-next-solo-hibrid/make-hibrid45.sh
+# The image also carries MBX_INDEX_STRICT (default on): hardlinked hibrid checkpoints leave stale
+# originals in the old shards and vLLM iterates FILES, not the index — packed 4-bit weights
+# shape-assert on the stale bf16 copies without it (the fp8 era survived only by shard sort order).
 
 server:
   image: mbx-qwen38-flash-next-solo-hibrid      # built from THIS folder's Dockerfile
   entrypoint: /opt/mbx/serve-entry.sh           # first-boot self-conversion, then exec vllm serve
-                                                # (checkpoint complete = instant skip; source missing =
-                                                # clear ./download.sh message instead of a load error)
-  model: /models/myllmbox/Qwen3.8-Flash-Next-hibrid
+  model: /models/myllmbox/Qwen3.8-Flash-Next-hibrid45
   cache: recipes/qwen38-flash-next-solo-vllm/.data/cache   # shared: SAME PLE table bytes (hardlinked
-                                                # shards) -> same tag reuses the banked 95G table + caches
+                                                # shards) -> same tag reuses the banked 95G table
 
   env:
     HF_HUB_OFFLINE: "1"
@@ -40,34 +47,18 @@ server:
     FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
     VLLM_CACHE_ROOT: /cache/vllm-cache
     OMP_NUM_THREADS: "15"
-    VLLM_USE_DEEP_GEMM: "0"                     # REQUIRED on GB10: vLLM sees "Blackwell" and routes our
-                                                # block-FP8 dense GEMMs to DeepGEMM, whose kernels are
-                                                # SM100-only -> cudaErrorLaunchFailure in the first forward
-                                                # (profile_run). With it off the selector picks CUTLASS
-                                                # block-fp8 (works on SM121 in THIS vLLM; the old "cutlass
-                                                # fails on GB10" note was the DS-V4-era v0.26 stack).
-    MBX_VOCAB_GEMV: "1"                         # ACTIVE A/B: M=1 lm_head via Triton GEMV — b12x measured
-                                                # 6.77->4.74ms on this head; runs 3x/cycle at K=3 (every
-                                                # draft step) => ~6ms of an ~85ms cycle, expected +5-7%
-                                                # steps. Baseline: drafted 35.4-36.3 / peak 47.0.
-    # MBX_FP8_LINEAR_KERNEL: "b12x"             # TESTED 2026-08-29: PARITY with CUTLASS (drafted 35.4-36.3
-                                                # both, peak 47.0 vs 46.9 = accept noise) — both at the DRAM
-                                                # floor at M=1-8. Default = stock dispatch (CUTLASS): fewer
-                                                # moving parts. b12x stays a proven-equivalent alternate
-                                                # (needed image patch: compile-opaque custom-op wrapper —
-                                                # upstream's lazy importlib dies under torch.compile).
-                                                # dense block-fp8 kernel — b12x = native SM121 CuTe GEMM,
-                                                # also: cutlass | triton | marlin. Unset = auto (CUTLASS).
-                                                # Safe to flip between boots: the Dockerfile keys the
-                                                # torch-compile cache on this env (fresh compile per value).
+    MBX_VOCAB_GEMV: "1"                         # championship-proven on the fp8 hibrid (+5.5% steps)
+    VLLM_MARLIN_USE_ATOMIC_ADD: "1"             # Marlin small-N fast path (its own warmup hint; also
+                                                # used in our DS-V4 MoE stack). Self-gating: only fires
+                                                # when n<2048 & k>=2048 & m*n small — i.e. the narrow
+                                                # shared-expert/fused fp4 GEMMs; big GEMMs untouched.
 
   vllm:
     served-model-name: Qwen/Qwen3.8-Flash-Next
     tensor-parallel-size: 1
     distributed-executor-backend: mp            # REQUIRED — PLE worker spawn gap on uniproc
     gpu-memory-utilization: 0.85
-    kv-cache-memory: "21474836480"              # 20 GiB pin (prod parity; body is ~3G SMALLER than prod —
-                                                # raise later if the fit proves roomy)
+    kv-cache-memory: "21474836480"              # 20 GiB pin (champion parity; body ~1.1G lighter still)
     max-model-len: 262144
     async-scheduling: false                     # unfixed async+MTP n-gram bug (PR #53896)
     max-num-seqs: 6
@@ -76,14 +67,13 @@ server:
     enable-auto-tool-choice: true
     tool-call-parser: qwen3_xml
     reasoning-parser: qwen3
-    speculative-config: '{"method":"mtp","num_speculative_tokens":3}'   # K=3 (current champion setting)
+    speculative-config: '{"method":"mtp","num_speculative_tokens":3}'   # K=3 (champion setting)
 
-# run.sh's model pipeline: a missing /models/myllmbox/* model triggers ./quantize.sh, which reads this —
-# source gets downloaded if absent, then the recipe-local converter builds the hibrid checkpoint.
-# (NOT the generic quantizer: this is checkpoint surgery, not weight quantization — hence `script`.)
+# run.sh model pipeline: missing /models/myllmbox/* -> quantize.sh -> this recipe-local converter
+# (source downloaded first if absent).
 quantize:
   source: /models/Inferact/Qwen3.8-Flash-Next-NVFP4
-  script: make-hibrid.sh
-  out: /models/myllmbox/Qwen3.8-Flash-Next-hibrid
+  script: make-hibrid45.sh
+  out: /models/myllmbox/Qwen3.8-Flash-Next-hibrid45
 
 dashboard: sparkdash

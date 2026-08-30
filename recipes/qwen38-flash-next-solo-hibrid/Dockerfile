@@ -1,4 +1,4 @@
-# mbx-qwen38-flash-next-solo-hibrid — solo-vllm content + FP8_PB_WO-in-mixed splice (hibrid ckpt).
+# mbx-qwen38-flash-next-solo-hibrid — HIBRID45 (champion 2026-08-30): NVFP4 dense except attention.
 # vLLM's VLLM_PLE_CPU_OFFLOAD runs the n-gram table in a separate CPU worker process, but keeps the table
 # RESIDENT in host RAM (95.4G bf16 for Inferact) — on unified memory that's the same pool as the GPU, so a
 # single Spark can't fit it. This patch (MBX_PLE_MMAP=1) backs the table with an unlinked file on /cache
@@ -114,141 +114,95 @@ open(p, "w").write(s)
 print("ple_layer.py patched: PLE file-backed + write-once persistence under MBX_PLE_MMAP_TAG")
 PYEOF
 
-# ---- HIBRID: FP8_PB_WO branch in the MIXED_PRECISION dispatcher (2026-08-29) ----
-# vLLM's ModelOptMixedPrecisionConfig already routes per-layer algos (its docstring names our exact
-# case: "FP8 for dense layers and NVFP4 for MoE experts") — but its LinearBase branch only dispatches
-# the per-tensor "FP8" flavor. Our hibrid checkpoint uses FP8_PB_WO (per-128x128-block weight-only,
-# DYNAMIC per-token activations — the zero-calibration flavor). One anchored branch adds it.
-RUN python3 - <<'PYEOF'
-p = "/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/modelopt.py"
-s = open(p).read()
-a = """            if quant_algo == "NVFP4":
-                return ModelOptNvFp4LinearMethod(self.nvfp4_config)
-            if quant_algo == "W4A16_NVFP4":
-                return ModelOptNvFp4W4A16LinearMethod(self.w4a16_nvfp4_config)"""
-assert s.count(a) == 1, "mixed-precision LinearBase dispatch anchor not found/unique"
-s = s.replace(a, """            if quant_algo == "NVFP4":
-                return ModelOptNvFp4LinearMethod(self.nvfp4_config)
-            if quant_algo == "W4A16_NVFP4":
-                return ModelOptNvFp4W4A16LinearMethod(self.w4a16_nvfp4_config)
-            if quant_algo == "FP8_PB_WO":
-                # mbx hibrid: per-block weight-only fp8 dense (dynamic act quant, no calibration).
-                # ONE shared config instance: every ModelOptFp8Config() construction logs the
-                # "experimental format" warning — per-layer instantiation spammed ~400 rows at load.
-                if not hasattr(self, "_mbx_pbwo_cfg"):
-                    self._mbx_pbwo_cfg = ModelOptFp8Config(
-                        "FP8_PB_WO", True, self.kv_cache_quant_method, []
-                    )
-                return ModelOptFp8PbWoLinearMethod(self._mbx_pbwo_cfg)""", 1)
-open(p, "w").write(s)
-print("modelopt.py: FP8_PB_WO wired into MIXED_PRECISION dispatch")
-PYEOF
-
-# ---- HIBRID A/B: b12x native SM121 dense block-fp8 GEMM (2026-08-29) ----
-# b12x (local-inference-lab) ships a native SM120/121 CuTe dense block-FP8 GEMM in exactly our format
-# (128x128 weight blocks, dynamic per-token-group activations). vLLM already carries the kernel class
-# (B12xFp8BlockScaledMMKernel) but it sits BELOW CUTLASS in the priority list, so installing the pip
-# package alone changes nothing — activation is explicit via MBX_FP8_LINEAR_KERNEL (patch below).
-# MoE is untouched: vLLM auto-selection deliberately excludes the b12x MoE backend (opt-in flag only).
-RUN pip install --no-cache-dir b12x==1.3.0
-
-RUN python3 - <<'PYEOF'
-# (1) MBX_FP8_LINEAR_KERNEL=b12x|cutlass|triton|marlin|deepgemm — force the block-fp8 dense kernel
-#     from the recipe yaml for A/B runs. Unset = stock priority dispatch (CUTLASS on GB10 today).
-#     A forced kernel that can't be implemented logs a note and falls back to normal dispatch.
-p = "/usr/local/lib/python3.12/dist-packages/vllm/model_executor/kernels/linear/__init__.py"
-s = open(p).read()
-a = """    if activation_quant_key.scale.group_shape.is_per_group():
-        kernel_type = choose_scaled_mm_linear_kernel("""
-assert s.count(a) == 1, "block-fp8 dispatch anchor not found/unique — upstream changed"
-assert "MBX_FP8_LINEAR_KERNEL" not in s, "already patched"
-patch = """    if activation_quant_key.scale.group_shape.is_per_group():
-        # MBX: A/B the block-fp8 dense kernel from the recipe yaml (see Dockerfile).
-        import os as _os
-        _mbx = _os.environ.get("MBX_FP8_LINEAR_KERNEL", "").strip().lower()
-        if force_kernel is None and _mbx:
-            force_kernel = {
-                "b12x": B12xFp8BlockScaledMMKernel,
-                "cutlass": CutlassFp8BlockScaledMMKernel,
-                "triton": TritonFp8BlockScaledMMKernel,
-                "marlin": MarlinFP8ScaledMMLinearKernel,
-                "deepgemm": DeepGemmFp8BlockScaledMMKernel,
-            }.get(_mbx)
-        kernel_type = choose_scaled_mm_linear_kernel("""
-s = s.replace(a, patch, 1)
-open(p, "w").write(s)
-print("kernels/linear/__init__.py: MBX_FP8_LINEAR_KERNEL force hook installed")
-
-# (2) Compile-cache guard: which GEMM op gets traced into compiled graphs depends on these envs, but
-#     vLLM does NOT key its torch-compile cache on them — a cached graph kept launching DeepGEMM after
-#     VLLM_USE_DEEP_GEMM=0 (2026-08-29, cost one crashed boot + a manual cache purge). Key the hash.
-p = "/usr/local/lib/python3.12/dist-packages/vllm/config/vllm.py"
-s = open(p).read()
-a = "        vllm_factors.append(__version__)"
-assert s.count(a) == 1, "compute_hash anchor not found/unique — upstream changed"
-s = s.replace(a, a + """
-        # MBX: kernel-selection envs change traced graphs — must be part of the compile-cache key.
-        import os as _os_mbx
-        vllm_factors.append(
-            "mbx-kernel-envs:"
-            + _os_mbx.environ.get("MBX_FP8_LINEAR_KERNEL", "")
-            + ","
-            + _os_mbx.environ.get("VLLM_USE_DEEP_GEMM", "1")
-        )""", 1)
-open(p, "w").write(s)
-print("config/vllm.py: kernel-selection envs keyed into the compile cache")
-
-# (3) torch.compile safety for the b12x kernel itself: upstream's _run_b12x_fp8_block_scaled_mm does
-#     a lazy importlib call INSIDE the traced code path -> dynamo dies with "Attempted to call
-#     function marked as skipped" the moment the first fp8 linear region compiles (boot crash,
-#     2026-08-29). Wrap the mm in an opaque custom op (same pattern as mbx_vocab_gemv) and rebind
-#     the module-level function — the class method resolves the global at call time.
-p = "/usr/local/lib/python3.12/dist-packages/vllm/model_executor/kernels/linear/scaled_mm/b12x_block.py"
-s = open(p).read()
-assert "mbx::b12x_block_fp8_mm" not in s, "already patched"
-assert "def _run_b12x_fp8_block_scaled_mm(" in s, "b12x mm anchor not found — upstream changed"
-s += '''
-
-# mbx: compile-opaque wrapper (see hibrid Dockerfile) — rebinds _run_b12x_fp8_block_scaled_mm
-import torch as _mbx_torch
-
-@_mbx_torch.library.custom_op("mbx::b12x_block_fp8_mm", mutates_args=())
-def _mbx_b12x_mm(
-    a: _mbx_torch.Tensor,
-    weight: _mbx_torch.Tensor,
-    a_scale: _mbx_torch.Tensor,
-    weight_scale: _mbx_torch.Tensor,
-) -> _mbx_torch.Tensor:
-    blockscaled = _import_b12x_blockscaled()
-    assert blockscaled is not None
-    return blockscaled.mm_block_fp8(
-        a, a_scale, weight, weight_scale, out_dtype=_mbx_torch.bfloat16
-    )
-
-@_mbx_b12x_mm.register_fake
-def _mbx_b12x_mm_fake(a, weight, a_scale, weight_scale):
-    return a.new_empty((a.shape[0], weight.shape[0]), dtype=_mbx_torch.bfloat16)
-
-def _run_b12x_fp8_block_scaled_mm(a, weight, a_scale, weight_scale, out_dtype):
-    out = _mbx_b12x_mm(a, weight, a_scale, weight_scale)
-    return out if out_dtype == _mbx_torch.bfloat16 else out.to(out_dtype)
-'''
-open(p, "w").write(s)
-print("b12x_block.py: compile-opaque custom-op wrapper installed")
-PYEOF
-
-# ---- OUT-OF-THE-BOX: first-boot self-conversion. The serve container carries the converter and the
-# entrypoint wrapper runs it before vllm: checkpoint already complete -> instant skip; missing ->
-# built from the Inferact source on /models (CPU-only, ~5-10 min, ONCE); source missing -> clear
-# message naming the ./download.sh command. So a fresh user needs exactly:
-#   ./download.sh Inferact/Qwen3.8-Flash-Next-NVFP4 && ./build-and-copy.sh <this> && ./run.sh <this>
+# ---- HIBRID45: dense -> NVFP4 W4A16 except QSA q/k/v/o (bf16). NO dispatch splice is needed —
+# vLLM's mixed config routes quant_algo W4A16_NVFP4 natively (ModelOptNvFp4W4A16LinearMethod, Marlin
+# via use_a16=True) and the attention stays plain bf16. The image carries only: converter +
+# first-boot entrypoint + index-strict loader + the proven vocab GEMV. (The fp8-era dispatch splice,
+# b12x wrapper and compile-cache env keying are GONE — nothing block-fp8 left to dispatch.)
 COPY docker/serve-entry.sh /opt/mbx/serve-entry.sh
-COPY docker/make-hibrid.py /opt/mbx/make-hibrid.py
+COPY docker/make-hibrid45.py /opt/mbx/make-hibrid45.py
 RUN chmod +x /opt/mbx/serve-entry.sh
 
-# ---- MBX_VOCAB_GEMV: M=1 lm_head via Triton GEMV (vendored from b12x master, see the module
-# docstring in docker/mbx_vocab_gemv.py — measured 6.77 -> 4.74 ms on this exact head shape).
-# Env-gated OFF by default; flip MBX_VOCAB_GEMV=1 in the recipe yaml to A/B.
+# ---- MBX_INDEX_STRICT (default ON): trust model.safetensors.index.json when iterating shards ----
+# Hibrid checkpoints HARDLINK the source shards and re-point the replaced tensors to a new shard via
+# the index — but the stale originals are still physically inside the old files, and vLLM's loader
+# iterates FILES, not the index, so every replaced weight arrives twice. The fp8 hibrid survived by
+# accident (same [out,in] shape -> assert passes; correct shard sorts last and wins); 4-bit packs to
+# [out,in/2] u8, so the stale BF16 copy hard-asserts in load_merged_column_weight. Fix: skip any
+# tensor read from a file the index does not map it to. No-op for non-hibrid checkpoints.
+RUN python3 - <<'PYEOF'
+p = "/usr/local/lib/python3.12/dist-packages/vllm/model_executor/model_loader/weight_utils.py"
+src = open(p).read()
+assert "MBX_INDEX_STRICT" not in src, "already patched"
+assert "import json" in src and "import os" in src
+
+anchor = "    leftover_state_dict: dict[str, torch.Tensor] = {}\n"
+assert src.count(anchor) == 1, "iterator anchor not found/unique — upstream changed"
+inject = anchor + """
+    # MBX: index-strict dedupe (see Dockerfile) — skip stale duplicates of tensors the
+    # index maps to a different shard file.
+    _mbx_index_map: dict[str, str] = {}
+    if os.environ.get("MBX_INDEX_STRICT", "1") == "1" and sorted_files:
+        _mbx_idx = os.path.join(
+            os.path.dirname(sorted_files[0]), "model.safetensors.index.json"
+        )
+        if os.path.isfile(_mbx_idx):
+            try:
+                with open(_mbx_idx) as _mbx_f:
+                    _mbx_index_map = json.load(_mbx_f).get("weight_map") or {}
+            except Exception:
+                _mbx_index_map = {}
+
+    def _mbx_stale(name: str, st_file: str) -> bool:
+        owner = _mbx_index_map.get(name)
+        return owner is not None and owner != os.path.basename(st_file)
+"""
+src = src.replace(anchor, inject)
+
+old1 = """            for name, param in state_dict.items():
+                if not should_skip_weight(name, local_expert_ids):
+                    yield name, param"""
+new1 = """            for name, param in state_dict.items():
+                if not should_skip_weight(name, local_expert_ids) and not _mbx_stale(
+                    name, st_file
+                ):
+                    yield name, param"""
+assert src.count(old1) == 1, "eager path anchor not found/unique"
+src = src.replace(old1, new1)
+
+old2 = """                for name in f.keys():  # noqa: SIM118
+                    if should_skip_weight(name, local_expert_ids):
+                        continue
+                    param = f.get_tensor(name)
+                    yield name, param"""
+new2 = """                for name in f.keys():  # noqa: SIM118
+                    if should_skip_weight(name, local_expert_ids) or _mbx_stale(
+                        name, st_file
+                    ):
+                        continue
+                    param = f.get_tensor(name)
+                    yield name, param"""
+assert src.count(old2) == 1, "default path anchor not found/unique"
+src = src.replace(old2, new2)
+
+old3 = """                for name in f.keys():  # noqa: SIM118
+                    if should_skip_weight(name, local_expert_ids):
+                        continue
+                    state_dict[name] = f.get_tensor(name)"""
+new3 = """                for name in f.keys():  # noqa: SIM118
+                    if should_skip_weight(name, local_expert_ids) or _mbx_stale(
+                        name, st_file
+                    ):
+                        continue
+                    state_dict[name] = f.get_tensor(name)"""
+assert src.count(old3) == 1, "torchao path anchor not found/unique"
+src = src.replace(old3, new3)
+
+open(p, "w").write(src)
+print("weight_utils.py: MBX_INDEX_STRICT stale-duplicate skip installed (default on)")
+PYEOF
+
+# ---- MBX_VOCAB_GEMV: championship-proven on the fp8 hibrid (+5.5% steps) — same vendored kernel ----
 COPY docker/mbx_vocab_gemv.py /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/mbx_vocab_gemv.py
 RUN python3 - <<'PYEOF'
 p = "/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/logits_processor.py"
