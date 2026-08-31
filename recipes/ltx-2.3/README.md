@@ -9,12 +9,24 @@ Ported from the old eugr recipe (`old-eugr/x/ltx-2.3-video.yaml` + `servers/ltx-
 `recipes/` structure: same server.py (verbatim), Dockerfile rebased on the house serve stack with
 the LTX-2 monorepo pinned to v1.3.0.
 
-## Measured (2026-07-20, OLD build — re-measure on this port before any model card)
+## Measured (2026-08-31, THIS build — v1.3.0, fp8-cast, gauntlet 3-seed averages)
 
-- 5s clip, 1280×704 @ 24fps (121 frames): **~91s steady**, ~117s first request (warm-up).
-- Output: h264 + **real synthesized AAC audio** (waves/ambience actually sound right), ~2–4MB.
-- Memory: the pipeline trims aggressively between requests — ~1GB resident idle; spikes only
-  during generation (peak unmeasured — don't co-host until it is).
+5-second clip (121 frames @ 24fps), warm serve:
+
+| tier | size | seconds / clip | band |
+|---|---|---|---|
+| HD | 1280×704 | **~87s** | 86.5–88.6 |
+| FHD | 1920×1088 | **~183s** | 181.5–187.5 |
+
+- FHD costs 2.10× HD — slightly sublinear vs the 2.34× pixel ratio; the 121-frame FHD VAE
+  decode fits comfortably (the memory probe passed clean, 6/6 clips).
+- First request after boot: ~124s at HD (one-time warm-up).
+- Output: h264 + **real synthesized AAC audio** (waves/ambience actually sound right), ~1–4MB.
+- Timing/quality protocol: `bench/README.md` (canonical seeds, FHD = showcase tier).
+
+From the July build (still true, re-check when relied on):
+- Memory: the pipeline trims aggressively between requests — ~1GB resident idle; generation
+  peak unmeasured precisely (don't co-host until it is).
 - **Keyframe i2v verified**: two `image` files → start+end keyframes, smooth in-betweening,
   identity+style locked (cartoon fox test; keyframes came from the image server on the other box).
 
