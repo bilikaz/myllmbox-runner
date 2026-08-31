@@ -52,8 +52,11 @@ curl -F prompt="a golden retriever running on a beach at sunset, waves" \
 ## The gauntlet
 
 `./bench/gauntlet-video.py <ip:port>` — the two standing scenes (`bench/pasture-video.txt`,
-`fish-video.txt`, the video adaptations where MOTION is literal) × the canonical seeds, at the
-canonical clip spec (1280×704, 121 frames @ 24). Winners → `tests/{pasture,fish}.mp4`.
+`fish-video.txt`, the video adaptations where MOTION is literal) × the canonical seeds. Clip
+length is constant: **121 frames @ 24fps = 5s**. Two speed tiers (3-seed average each):
+**HD 1280×704** (canonical, July-verified) and **FHD 1920×1088** (`--size 1920x1088`) — FHD is
+the showcase tier once a first run proves the 121-frame VAE decode fits in memory; no QHD for
+video. Winners → `tests/{pasture,fish}.mp4`.
 
 ## Knobs & TODO (carried from July)
 

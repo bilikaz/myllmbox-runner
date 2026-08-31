@@ -42,12 +42,21 @@ Speed is measured at ALL THREE standard resolutions, each as the 3-seed average:
   runs, not rescales. Qwen-Image-Edit quirk: avoid exactly 1024×1024 (the one known trap size —
   breaks only when output==input size AND a dim is exactly 1024).
 
-## The canonical clip (video models)
+## Video tiers (video models — exact same on every model)
 
-One standard spec, every model: **1280×704, 121 frames @ 24fps (~5s)** — speed = the 3-seed
-average at that spec. (Dims snap to /64 on LTX-class two-stage pipelines — that's why 704, not
-720.) The committed `tests/` winners are `{pasture,fish}.mp4` at the canonical spec; audio, when
-the model makes it, is part of the judgment.
+TWO tiers (no QHD — a 5s QHD clip is where time and memory explode, with no showcase payoff);
+frames constant across tiers: **121 frames @ 24fps (~5s)**, speed = the 3-seed average per tier.
+LTX-class pipelines snap dims to /64, so the tiers land on slightly non-standard numbers:
+
+| tier | size (snapped /64) |
+|---|---|
+| HD | 1280×704 |
+| FHD | 1920×1088 |
+
+- **HD is the canonical spec** (the July-verified size). **FHD is the showcase tier** — committed
+  `tests/{pasture,fish}.mp4` winners come from FHD *once a first FHD run proves it fits in memory*
+  (the 121-frame VAE decode is the peak); until then HD winners stand.
+- Audio, when the model makes it, is part of the judgment (the prompts carry a SOUND section).
 
 ## Tools
 
