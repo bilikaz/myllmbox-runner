@@ -340,8 +340,9 @@ def _mbx_unpack(pk: "torch.Tensor", bits: int, D: int) -> "torch.Tensor":
 
 
 def _mbx_q_build(self) -> None:
-    """One-time: stream the bf16 mmap bank sequentially, quantize to MBX_PLE_QBITS bits
-    (asymmetric, per-group min+scale fp16), keep packed+scales RESIDENT."""
+    """One-time EVER per (tag,bits,group): quantize the bf16 bank and PERSIST the packed table to
+    the cache (write-once + marker, same pattern as the bank itself); later boots mmap the packed
+    file directly -- no bf16 skim, no rebuild, PLE ready in seconds and page-cache-friendly."""
     import time as _t
 
     _log = __import__("logging").getLogger("mbx.ple.qbits")
@@ -356,6 +357,30 @@ def _mbx_q_build(self) -> None:
     G = D // group
     levels = (1 << bits) - 1
     bytes_per_row = {2: D // 4, 3: (D // 8) * 3, 4: D // 2}[bits]
+
+    _dir = _mbx_os.environ.get("MBX_PLE_MMAP_DIR", "/cache/ple-mmap")
+    _tag = _mbx_os.environ.get("MBX_PLE_MMAP_TAG", "") or "untagged"
+    _base = _mbx_os.path.join(_dir, f"{_tag}-qbits{bits}-g{group}-{V}x{D}")
+    _pf, _sf, _mf, _ok = _base + ".packed", _base + ".scales", _base + ".mins", _base + ".ok"
+
+    if (
+        _mbx_os.path.exists(_ok)
+        and _mbx_os.path.getsize(_pf) == V * bytes_per_row
+        and _mbx_os.path.getsize(_sf) == V * G * 2
+        and _mbx_os.path.getsize(_mf) == V * G * 2
+    ):
+        packed = torch.from_file(_pf, shared=True, size=V * bytes_per_row, dtype=torch.uint8).view(V, bytes_per_row)
+        scales = torch.from_file(_sf, shared=True, size=V * G, dtype=torch.float16).view(V, G)
+        mins = torch.from_file(_mf, shared=True, size=V * G, dtype=torch.float16).view(V, G)
+        self._mbx_q = (packed, scales, mins, group, bits)
+        _log.info(
+            "MBX_PLE_QBITS: mmapped persisted int%d table %s (%.1f GiB, no rebuild)",
+            bits, _base, (packed.numel() + 2 * scales.numel() + 2 * mins.numel()) / 2**30,
+        )
+        print(f"MBX_PLE_QBITS: mmapped persisted int{bits} table {_base} (no rebuild)", flush=True)
+        return
+
+    _mbx_os.makedirs(_dir, exist_ok=True)
     packed = torch.empty((V, bytes_per_row), dtype=torch.uint8)
     scales = torch.empty((V, G), dtype=torch.float16)
     mins = torch.empty((V, G), dtype=torch.float16)
@@ -374,12 +399,23 @@ def _mbx_q_build(self) -> None:
         mins[i:j] = mn.to(torch.float16)
         i = j
     self._mbx_q = (packed, scales, mins, group, bits)
+    try:
+        packed.numpy().tofile(_pf)
+        scales.numpy().tofile(_sf)
+        mins.numpy().tofile(_mf)
+        _mbx_os.sync()
+        open(_ok, "w").write("ok")
+        for _f in (_pf, _sf, _mf, _ok):
+            _mbx_os.chmod(_f, 0o644)
+        _persist = "persisted for future boots"
+    except Exception as _e:  # noqa: BLE001
+        _persist = f"persist FAILED ({_e}); staying resident this boot"
     _log.info(
-        "MBX_PLE_QBITS: %dx%d table quantized to int%d in %.1fs (group %d) -- %.1f GiB resident; "
-        "bf16 bank will not be paged again",
+        "MBX_PLE_QBITS: %dx%d table quantized to int%d in %.1fs (group %d) -- %.1f GiB; %s",
         V, D, bits, _t.time() - t0, group,
-        (packed.numel() + 2 * scales.numel() + 2 * mins.numel()) / 2**30,
+        (packed.numel() + 2 * scales.numel() + 2 * mins.numel()) / 2**30, _persist,
     )
+    print(f"MBX_PLE_QBITS: quantized to int{bits} in {_t.time()-t0:.1f}s -- {_persist}", flush=True)
 
 
 def _mbx_q_gather(self, ids: "torch.Tensor", out: "torch.Tensor") -> None:
