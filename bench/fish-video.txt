@@ -10,7 +10,8 @@ CANVAS / COMPOSITION
   (the depths).
 - A sandy or rocky seafloor along the bottom (~10–15% of the frame), in tan/beige/brown.
 
-FISH — exactly 2 fish, both fully visible, visibly different from each other. Each fish must be
+FISH — EXACTLY 2 fish in the entire scene: two and only two, never a third fish, no school, no
+background fish. Both fully visible, visibly different from each other. Each fish must be
 RECOGNIZABLE as a fish without any text label.
 
 Required features for EACH fish:
@@ -36,9 +37,9 @@ SEAWEED / PLANTS
 MOTION (actual movement over the clip — the animation is the point)
 - Both fish are swimming horizontally across the scene, each heading at its own pace, tails
   moving as they swim.
-- The two fish swim in SEPARATE LANES: one fish along an upper line (upper half of the water),
-  the other along a lower line (lower half of the water). They stay in their own lanes for the
-  whole clip — they never meet, never touch, never overlap and never block each other.
+- The LARGER fish swims across the upper half of the water; the SMALLER fish swims across the
+  lower half. Each keeps to its own depth for the whole clip — the two never meet, never touch,
+  never overlap and never block each other.
 - Both fish keep swimming for the entire clip — the motion never stops or freezes.
 - The bubbles are rising toward the surface throughout the clip.
 - The seaweed sways gently.
