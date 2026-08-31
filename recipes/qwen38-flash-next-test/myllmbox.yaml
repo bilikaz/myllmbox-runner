@@ -80,11 +80,10 @@ server:
     kv-cache-memory: "16000000000"              # TEST: 16 GB (bytes) — vs champion's 25G; the int3 PLE
                                                 # table (~19G, persisted+mmapped) took the difference.
                                                 # At fp8 KV below: ~1M tokens (bf16 would be ~500k).
-    kv-cache-dtype: fp8                         # RUNG: fp8 KV halves bytes/token -> doubles the pool.
-                                                # Tension: K vectors are the QSA comparators' inputs —
-                                                # judge by today's int3 acceptance bands (code 3.6-3.84,
-                                                # prose 2.31-2.44); any sag = comparator law claims KV,
-                                                # revert to auto. Boot itself tests SM121 kernel support.
+    # kv-cache-dtype: fp8  — RUNG CLOSED 2026-08-31: boot refused with
+    #   NotImplementedError: "Qwen3.8-Flash-Next QSA requires a BF16 main KV cache" (qsa.py guard).
+    # Vendor policy, both engines (sglang asserted the same in its CuTe fallback). KV stays bf16
+    # on this architecture — capacity comes from the KV/table RAM split, not dtype.
     #max-model-len: 262144
     max-model-len: 131072
     async-scheduling: false                     # unfixed async+MTP n-gram bug (PR #53896)
