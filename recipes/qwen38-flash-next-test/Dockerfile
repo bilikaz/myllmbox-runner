@@ -234,15 +234,17 @@ open(p, "w").write(s)
 print("logits_processor.py: MBX_VOCAB_GEMV fast path installed (default off)")
 PYEOF
 
-# ---- MBX_PLE_INT2 (TEST LANE): quantize the 95.4G bf16 PLE/n-gram table to int2 (group-64
-# asymmetric, ~14.9G) RESIDENT in the CPU offload worker; every gather dequants on read. Built
-# lazily at the FIRST gather (engine warmup), streaming the bf16 mmap bank once sequentially —
+# ---- MBX_PLE_QBITS (TEST LANE): quantize the 95.4G bf16 PLE/n-gram table to 2/3/4-bit
+# (group-64 asymmetric) RESIDENT in the CPU offload worker; every gather dequants on read. Built
+# lazily at the FIRST gather (engine warmup), streaming the bf16 mmap bank once sequentially --
 # after that the bank is never paged again, killing the ~200MB/s NVMe traffic at c>=3.
-# PLE feeds the MAIN forward: quality judged by gauntlet + paired A/B, not just acceptance.
+# Sizes: 4-bit ~26.9G / 3-bit ~19.2G / 2-bit ~14.9G resident. Ladder protocol: bf16 champion is
+# the measured top rung; start at the highest width that FITS (int3 at KV 12G), descend only if
+# quality holds. PLE feeds the MAIN forward: judged by gauntlet + paired A/B, not just acceptance.
 RUN python3 - <<'PYEOF'
 p = "/usr/local/lib/python3.12/dist-packages/vllm/models/qwen3_8_flash_next/nvidia/ple_layer.py"
 s = open(p).read()
-assert "MBX_PLE_INT2" not in s, "already patched"
+assert "MBX_PLE_QBITS" not in s, "already patched"
 
 anchor = """        if output_buffer is not None:
             output = output_buffer[:num_tokens, : self.embedding_dim]
@@ -256,8 +258,8 @@ anchor = """        if output_buffer is not None:
         return self.ngram_embedding(ngram_ids).flatten(-2)"""
 patch = """        if output_buffer is not None:
             output = output_buffer[:num_tokens, : self.embedding_dim]
-            if _mbx_ple_int2_enabled() and is_offload_process():
-                _mbx_int2_gather(self, ngram_ids.reshape(-1), output.reshape(-1, self.head_dim))
+            if _mbx_ple_qbits() and is_offload_process():
+                _mbx_q_gather(self, ngram_ids.reshape(-1), output.reshape(-1, self.head_dim))
                 return output
             torch.index_select(
                 self.ngram_embedding.weight,
@@ -266,41 +268,95 @@ patch = """        if output_buffer is not None:
                 out=output.reshape(-1, self.head_dim),
             )
             return output
-        if _mbx_ple_int2_enabled() and is_offload_process():
+        if _mbx_ple_qbits() and is_offload_process():
             _flat = ngram_ids.reshape(-1)
             _out = torch.empty(
                 (_flat.numel(), self.head_dim), dtype=self.ngram_embedding.weight.dtype
             )
-            _mbx_int2_gather(self, _flat, _out)
+            _mbx_q_gather(self, _flat, _out)
             return _out.view(*ngram_ids.shape, self.head_dim).flatten(-2)
         return self.ngram_embedding(ngram_ids).flatten(-2)"""
-assert s.count(anchor) == 1, "PLE gather anchor not found/unique — upstream changed"
+assert s.count(anchor) == 1, "PLE gather anchor not found/unique -- upstream changed"
 s = s.replace(anchor, patch, 1)
 
 s += '''
 
-# ---- MBX_PLE_INT2 helpers (module-level; resolve at call time) ----------------------------------
+# ---- MBX_PLE_QBITS helpers (module-level; resolve at call time) ----------------------------------
 import os as _mbx_os
 
 
-def _mbx_ple_int2_enabled() -> bool:
-    return _mbx_os.environ.get("MBX_PLE_INT2", "0") == "1"
+def _mbx_ple_qbits() -> int:
+    """0 = off; 2/3/4 = quantize the PLE table to that many bits (group asymmetric, resident)."""
+    try:
+        b = int(_mbx_os.environ.get("MBX_PLE_QBITS", "0"))
+    except ValueError:
+        return 0
+    return b if b in (2, 3, 4) else 0
 
 
-def _mbx_int2_build(self) -> None:
-    """One-time: stream the bf16 mmap bank sequentially, quantize to int2 (asymmetric, per-group
-    min+scale fp16), keep packed+scales RESIDENT. ~14.9G for the 95.4G Inferact table."""
+def _mbx_pack(q: "torch.Tensor", bits: int) -> "torch.Tensor":
+    """Pack [n, D] uint8 codes into bytes. 2b: 4/byte; 4b: 2/byte; 3b: 8 codes -> 3 bytes."""
+    n, D = q.shape
+    if bits == 2:
+        v = q.view(n, D // 4, 4)
+        return v[..., 0] | (v[..., 1] << 2) | (v[..., 2] << 4) | (v[..., 3] << 6)
+    if bits == 4:
+        v = q.view(n, D // 2, 2)
+        return v[..., 0] | (v[..., 1] << 4)
+    v = q.view(n, D // 8, 8)
+    out = torch.empty((n, D // 8, 3), dtype=torch.uint8)
+    out[..., 0] = v[..., 0] | (v[..., 1] << 3) | ((v[..., 2] & 3) << 6)
+    out[..., 1] = (v[..., 2] >> 2) | (v[..., 3] << 1) | (v[..., 4] << 4) | ((v[..., 5] & 1) << 7)
+    out[..., 2] = (v[..., 5] >> 1) | (v[..., 6] << 2) | (v[..., 7] << 5)
+    return out.view(n, (D // 8) * 3)
+
+
+def _mbx_unpack(pk: "torch.Tensor", bits: int, D: int) -> "torch.Tensor":
+    """Inverse of _mbx_pack -> [n, D] uint8 codes."""
+    n = pk.shape[0]
+    if bits == 2:
+        q = torch.empty((n, D // 4, 4), dtype=torch.uint8)
+        q[..., 0] = pk & 3
+        q[..., 1] = (pk >> 2) & 3
+        q[..., 2] = (pk >> 4) & 3
+        q[..., 3] = (pk >> 6) & 3
+        return q.view(n, D)
+    if bits == 4:
+        q = torch.empty((n, D // 2, 2), dtype=torch.uint8)
+        q[..., 0] = pk & 15
+        q[..., 1] = (pk >> 4) & 15
+        return q.view(n, D)
+    b = pk.view(n, D // 8, 3)
+    q = torch.empty((n, D // 8, 8), dtype=torch.uint8)
+    q[..., 0] = b[..., 0] & 7
+    q[..., 1] = (b[..., 0] >> 3) & 7
+    q[..., 2] = ((b[..., 0] >> 6) & 3) | ((b[..., 1] & 1) << 2)
+    q[..., 3] = (b[..., 1] >> 1) & 7
+    q[..., 4] = (b[..., 1] >> 4) & 7
+    q[..., 5] = ((b[..., 1] >> 7) & 1) | ((b[..., 2] & 3) << 1)
+    q[..., 6] = (b[..., 2] >> 2) & 7
+    q[..., 7] = (b[..., 2] >> 5) & 7
+    return q.view(n, D)
+
+
+def _mbx_q_build(self) -> None:
+    """One-time: stream the bf16 mmap bank sequentially, quantize to MBX_PLE_QBITS bits
+    (asymmetric, per-group min+scale fp16), keep packed+scales RESIDENT."""
     import time as _t
 
-    _log = __import__("logging").getLogger("mbx.ple.int2")
+    _log = __import__("logging").getLogger("mbx.ple.qbits")
+    bits = _mbx_ple_qbits()
     w = self.ngram_embedding.weight
     V, D = int(w.shape[0]), int(w.shape[1])
-    group = int(_mbx_os.environ.get("MBX_PLE_INT2_GROUP", "64"))
-    if D % group != 0 or D % 4 != 0:
-        group = D  # per-row fallback; D%4 asserted below
-    assert D % 4 == 0, f"PLE head_dim {D} not divisible by 4 — int2 packing needs it"
+    group = int(_mbx_os.environ.get("MBX_PLE_QBITS_GROUP", "64"))
+    align = 8 if bits == 3 else (4 if bits == 2 else 2)
+    if D % group != 0:
+        group = D
+    assert D % align == 0, f"PLE head_dim {D} not divisible by {align} -- packing needs it"
     G = D // group
-    packed = torch.empty((V, D // 4), dtype=torch.uint8)
+    levels = (1 << bits) - 1
+    bytes_per_row = {2: D // 4, 3: (D // 8) * 3, 4: D // 2}[bits]
+    packed = torch.empty((V, bytes_per_row), dtype=torch.uint8)
     scales = torch.empty((V, G), dtype=torch.float16)
     mins = torch.empty((V, G), dtype=torch.float16)
     rows = max(1, (1 << 27) // D)  # ~512MB fp32 working chunk
@@ -311,40 +367,33 @@ def _mbx_int2_build(self) -> None:
         x = w[i:j].to(torch.float32)
         g = x.view(j - i, G, group)
         mn = g.amin(-1)
-        sc = ((g.amax(-1) - mn) / 3.0).clamp_min(1e-8)
-        q = torch.round((g - mn.unsqueeze(-1)) / sc.unsqueeze(-1)).clamp_(0, 3).to(torch.uint8)
-        q4 = q.view(j - i, D // 4, 4)
-        packed[i:j] = q4[..., 0] | (q4[..., 1] << 2) | (q4[..., 2] << 4) | (q4[..., 3] << 6)
+        sc = ((g.amax(-1) - mn) / levels).clamp_min(1e-8)
+        q = torch.round((g - mn.unsqueeze(-1)) / sc.unsqueeze(-1)).clamp_(0, levels).to(torch.uint8)
+        packed[i:j] = _mbx_pack(q.view(j - i, D), bits)
         scales[i:j] = sc.to(torch.float16)
         mins[i:j] = mn.to(torch.float16)
         i = j
-    self._mbx_i2 = (packed, scales, mins, group)
+    self._mbx_q = (packed, scales, mins, group, bits)
     _log.info(
-        "MBX_PLE_INT2: %dx%d table quantized in %.1fs (group %d) — %.1f GiB resident; "
+        "MBX_PLE_QBITS: %dx%d table quantized to int%d in %.1fs (group %d) -- %.1f GiB resident; "
         "bf16 bank will not be paged again",
-        V, D, _t.time() - t0, group,
+        V, D, bits, _t.time() - t0, group,
         (packed.numel() + 2 * scales.numel() + 2 * mins.numel()) / 2**30,
     )
 
 
-def _mbx_int2_gather(self, ids: "torch.Tensor", out: "torch.Tensor") -> None:
+def _mbx_q_gather(self, ids: "torch.Tensor", out: "torch.Tensor") -> None:
     """Gather rows for ids and dequant into out (bf16). Runs on the offload CPU worker."""
-    if getattr(self, "_mbx_i2", None) is None:
-        _mbx_int2_build(self)
-    packed, scales, mins, group = self._mbx_i2
+    if getattr(self, "_mbx_q", None) is None:
+        _mbx_q_build(self)
+    packed, scales, mins, group, bits = self._mbx_q
     pk = packed.index_select(0, ids)
-    n, dp = pk.shape
-    D = dp * 4
-    q = torch.empty((n, dp, 4), dtype=torch.uint8)
-    q[..., 0] = pk & 3
-    q[..., 1] = (pk >> 2) & 3
-    q[..., 2] = (pk >> 4) & 3
-    q[..., 3] = (pk >> 6) & 3
-    x = q.view(n, D // group, group).to(torch.float32)
+    D = out.shape[-1]
+    x = _mbx_unpack(pk, bits, D).view(pk.shape[0], D // group, group).to(torch.float32)
     x.mul_(scales.index_select(0, ids).unsqueeze(-1).to(torch.float32))
     x.add_(mins.index_select(0, ids).unsqueeze(-1).to(torch.float32))
-    out.copy_(x.view(n, D))
+    out.copy_(x.view(pk.shape[0], D))
 '''
 open(p, "w").write(s)
-print("ple_layer.py: MBX_PLE_INT2 resident int2 table + dequant-on-gather installed (default off)")
+print("ple_layer.py: MBX_PLE_QBITS resident 2/3/4-bit table + dequant-on-gather installed (default off)")
 PYEOF
