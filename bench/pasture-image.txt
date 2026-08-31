@@ -1,83 +1,21 @@
-Generate a single image of a cheerful pasture scene with animals, in a clean flat-illustration
-style. No photorealism. No text, letters, numbers, labels, logos or watermarks anywhere in the
-image.
+A cheerful pasture scene in a clean flat vector-art cartoon style, like a children's storybook
+illustration — crisp shapes, flat colors, simple shading, bright daylight, no photorealism. The
+upper two thirds of the frame is a light blue sky fading toward white at the horizon; the lower
+third is a bright green meadow with subtle grass texture. A round yellow sun with a soft glowing
+halo and at least six long triangular rays sits high in the sky, and three puffy white clouds,
+each built from several overlapping round lobes, drift across it. Two leafy green trees with
+brown trunks stand rooted in the grass, one on each side of the meadow.
 
-HARD REQUIREMENTS — the image must show ALL of them:
+Four different farm animals are spaced out across the meadow, each on its own patch of grass with
+a soft shadow beneath it, and each one is caught in the middle of a playful hop, every animal at
+a different point of its bounce.
 
-CANVAS / COMPOSITION
-- Landscape scene filling the whole frame, nothing cropped at the edges.
-- A sky gradient background (light blue at top, transitioning to lighter blue/white near the
-  horizon) covering the upper ~65% of the frame.
-- A grass area (green, with subtle texture or gradient) covering the lower ~35%, with a clear
-  horizon line where they meet.
+A white cow with black patches, two horns, a pink nose and a pink udder hops on its four legs. A
+fluffy white sheep, its wool drawn as many overlapping puffs, with a dark gray face and four dark
+legs, hops beside it. A small pink pig with a round body, a snout with two nostrils, little
+triangular ears and a curly tail hops near the middle. A tall brown horse with a long neck, a
+dark mane, a swishing tail and four long legs hops at the far side. The horse is the biggest, the
+pig is the smallest, none of them overlap, and every animal fits completely inside the frame.
 
-SUN
-- A yellow circle in the upper portion of the sky.
-- Surrounded by a lighter yellow halo / glow.
-- At least 6 ray lines or triangles emanating outward from the sun.
-
-CLOUDS
-- At least 3 white or off-white clouds in the sky.
-- Each cloud clearly built from 3+ overlapping puffs/circles — NOT a single smooth shape.
-
-TREES
-- At least 2 trees rooted firmly on the grass (NOT floating in the sky or buried in the ground).
-- Each tree has:
-    * A brown trunk (rectangle or tapered shape).
-    * A green canopy (cluster of overlapping rounded shapes) that looks tree-like — not a green
-      blob on a brown stick.
-
-ANIMALS — exactly 4 distinct species, all visible at once. Each animal must be RECOGNIZABLE as its
-species WITHOUT a text label — a person glancing at the scene should say "that's a sheep, that's a
-cow."
-
-Required species and their non-negotiable identifying features:
-
-  COW
-    - Body: white/cream with at least 3 black patches/spots.
-    - Exactly 4 legs visible (this is critical — count them).
-    - 2 horns or 2 small ears on the head.
-    - 2 eyes.
-    - A pink udder OR a pink nose (cow-defining feature).
-
-  SHEEP
-    - Body: fluffy white wool drawn as many overlapping puffs — NOT a single smooth oval.
-    - Exactly 4 dark legs visible.
-    - A dark face (gray or black).
-    - 2 eyes.
-    - 2 ears.
-
-  PIG
-    - Body: pink, mostly oval/round.
-    - Exactly 4 legs visible.
-    - Pink snout (a small oval at the front of the face) with 2 nostrils.
-    - 2 small triangular ears.
-    - 2 eyes.
-    - A small curly tail.
-
-  HORSE
-    - Body: brown, longer than tall.
-    - Exactly 4 legs visible (longer than the cow/sheep/pig legs).
-    - Long neck.
-    - Visible mane (darker shape along the neck).
-    - 2 ears.
-    - 2 eyes.
-    - A tail at the rear.
-
-GENERAL ANIMAL RULES (apply to all 4):
-- All 4 animals on the grass, grounded by their shadows — not floating in the sky.
-- Animals roughly proportional to each other (a horse is not the same size as a pig; the pig is
-  the smallest).
-- No animals overlapping each other; spaced across the field.
-- Each animal has a clearly visible head/face turned toward the viewer or in profile.
-- Complete bodies — no animal cut off by the frame edge or hidden behind scenery.
-
-MOTION (conveyed in the still image — how is up to you)
-- The animals are bouncing: caught mid-hop, each at a different phase (not all in sync).
-- The clouds are drifting across the sky.
-
-STYLE / QUALITY
-- Clean flat-illustration / vector-art style: crisp shapes, flat colors, simple shading.
-- Bright daylight, friendly storybook mood.
-- High-resolution HD render: sharp clean edges, no blur, no artifacts, no distorted anatomy,
-  no extra limbs, masterpiece-quality illustration, 4K detail.
+A high-resolution HD illustration with sharp clean edges, no blur, no artifacts, no distorted
+anatomy and no extra limbs. No text, letters, numbers, logos or watermarks anywhere in the image.
