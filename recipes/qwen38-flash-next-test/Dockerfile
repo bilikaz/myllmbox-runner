@@ -120,7 +120,7 @@ PYEOF
 # first-boot entrypoint + index-strict loader + the proven vocab GEMV. (The fp8-era dispatch splice,
 # b12x wrapper and compile-cache env keying are GONE — nothing block-fp8 left to dispatch.)
 COPY docker/serve-entry.sh /opt/mbx/serve-entry.sh
-COPY docker/make-hibrid45.py /opt/mbx/make-hibrid45.py
+COPY docker/make-hibrid46.py /opt/mbx/make-hibrid46.py
 RUN chmod +x /opt/mbx/serve-entry.sh
 
 # ---- MBX_INDEX_STRICT (default ON): trust model.safetensors.index.json when iterating shards ----

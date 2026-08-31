@@ -1,10 +1,17 @@
-# Qwen3.8-Flash-Next HIBRID45 — ======== TEST LANE: INT2 PLE TABLE (experiment 2026-08-31) ========
-# Copy of the champion recipe with ONE experiment: the 95.4G bf16 n-gram/PLE table is quantized to
-# INT2 (group-64 asymmetric, ~14.9G) RESIDENT in the CPU offload worker at load, and every gather
-# dequants on read — the bf16 mmap bank is never touched after the one quantization pass, so the
-# ~200MB/s NVMe paging that throttles c>=3 disappears. KV pool dropped 25G -> 12G to make room.
-# PLE feeds the MAIN forward (Alibaba excluded it from quant), so the judge is the full quality
-# gauntlet + paired A/B, not just acceptance. Champion recipe untouched.
+# Qwen3.8-Flash-Next HIBRID46 — ===== TEST LANE (2026-08-31): the next-generation stack =====
+# hibrid46 = a REAL reconversion (make-hibrid46.sh -> Qwen3.8-Flash-Next-hibrid46, hibrid45 untouched):
+#   checkpoint: shared expert BACK to bf16 (~0.4% steps for unmeasured risk — and Alibaba's own FP8
+#               release excludes it too); GDN stays nvfp4 (~3.5% steps, A/B-validated). "4.6 bits".
+#   serve-time: PLE table int3 (persisted+mmapped, MBX_PLE_QBITS) + KV cache fp8 (doubles the pool).
+# Graduates to the champion recipe as ONE stack once the formal gauntlet + paired A/B pass.
+# Copy of the champion recipe with ONE experiment: the 95.4G bf16 n-gram/PLE table quantized to
+# MBX_PLE_QBITS bits (group-64 asymmetric) RESIDENT in the CPU offload worker, gathers dequanting
+# on read — the bf16 mmap bank is never touched after the one quantization pass, so the ~200MB/s
+# NVMe paging that throttles c>=3 disappears. KV dropped 25G -> 12G to make room.
+# LADDER (high->low, stop where quality breaks): bf16 champion = measured top rung; int3 (~19.2G)
+# = rung 1; int2 (~14.9G) only if int3 holds; int4 (~26.9G, KV<=6G) = diagnostic. PLE feeds the
+# MAIN forward (Alibaba excluded it from quant): judge = gauntlet + paired A/B, not acceptance.
+# Champion recipe untouched.
 # Inferact NVFP4 experts + OUR NVFP4 dense EXCEPT attention (QSA q/k/v/o untouched bf16), solo box.
 #
 # THE PRECISION MAP (why this split — measured, not guessed):
@@ -36,8 +43,8 @@
 server:
   image: mbx-qwen38-flash-next-test # built from THIS folder's Dockerfile (champion + int2-PLE patch)
   entrypoint: /opt/mbx/serve-entry.sh           # first-boot self-conversion, then exec vllm serve
-  model: /models/myllmbox/Qwen3.8-Flash-Next-hibrid45
-  cache: recipes/qwen38-flash-next/.data/cache   # shared: SAME PLE table bytes (hardlinked
+  model: /models/myllmbox/Qwen3.8-Flash-Next-hibrid46
+  cache: recipes/qwen38-flash-next-test/.data/cache   # shared: SAME PLE table bytes (hardlinked
                                                 # shards) -> same tag reuses the banked 95G table
 
   env:
@@ -47,10 +54,13 @@ server:
     VLLM_PLE_CPU_OFFLOAD: "1"
     MBX_PLE_MMAP: "1"                           # never disable (house rule)
     MBX_PLE_MMAP_TAG: "inferact-nvfp4"          # table bytes identical to Inferact (hardlinks) — reuse bank
-    MBX_PLE_INT2: "1"                           # THE EXPERIMENT: quantize the PLE table to int2 (group-64
-                                                # asymmetric) RESIDENT ~14.9G at load; gathers dequant on
-                                                # read; the bf16 mmap bank is never paged again after the
-                                                # one-time quantization pass. MBX_PLE_INT2_GROUP overrides.
+    MBX_PLE_QBITS: "3"                          # THE EXPERIMENT (ladder, high->low): quantize the PLE table
+                                                # to N bits (group-64 asymmetric) RESIDENT at first gather;
+                                                # dequant on read; the bf16 mmap bank never pages again.
+                                                # Rung 1 = int3 (~19.2G, highest width that fits at KV 12G).
+                                                # bf16 champion = the measured top rung; descend to "2"
+                                                # (~14.9G) only if int3 matches it on quality. "4" (~26.9G)
+                                                # = diagnostic rung, needs KV <= ~6G. MBX_PLE_QBITS_GROUP overrides.
     TORCH_CUDA_ARCH_LIST: "12.1a"
     FLASHINFER_CUDA_ARCH_LIST: "12.1a"
     FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
@@ -66,11 +76,17 @@ server:
     served-model-name: Qwen/Qwen3.8-Flash-Next
     tensor-parallel-size: 1
     distributed-executor-backend: mp            # REQUIRED — PLE worker spawn gap on uniproc
-    gpu-memory-utilization: 0.85
-    kv-cache-memory: "12000000000"              # TEST: 12 GB (bytes) — 13G surrendered vs the champion's
-                                                # 25G to hold the ~14.9G resident int2 PLE table without
-                                                # OOM risk. ~380k KV tokens. Champion keeps 25G.
-    max-model-len: 262144
+    gpu-memory-utilization: 0.75
+    kv-cache-memory: "16000000000"              # TEST: 16 GB (bytes) — vs champion's 25G; the int3 PLE
+                                                # table (~19G, persisted+mmapped) took the difference.
+                                                # At fp8 KV below: ~1M tokens (bf16 would be ~500k).
+    kv-cache-dtype: fp8                         # RUNG: fp8 KV halves bytes/token -> doubles the pool.
+                                                # Tension: K vectors are the QSA comparators' inputs —
+                                                # judge by today's int3 acceptance bands (code 3.6-3.84,
+                                                # prose 2.31-2.44); any sag = comparator law claims KV,
+                                                # revert to auto. Boot itself tests SM121 kernel support.
+    #max-model-len: 262144
+    max-model-len: 131072
     async-scheduling: false                     # unfixed async+MTP n-gram bug (PR #53896)
     max-num-seqs: 8
     max-num-batched-tokens: 16384
@@ -84,7 +100,7 @@ server:
 # (source downloaded first if absent).
 quantize:
   source: /models/Inferact/Qwen3.8-Flash-Next-NVFP4
-  script: make-hibrid45.sh
-  out: /models/myllmbox/Qwen3.8-Flash-Next-hibrid45
+  script: make-hibrid46.sh
+  out: /models/myllmbox/Qwen3.8-Flash-Next-hibrid46
 
 dashboard: sparkdash
