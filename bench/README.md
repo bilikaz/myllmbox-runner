@@ -15,8 +15,19 @@ comparing models is arithmetic, not taste.
 | `fish-text.txt` | text/code | one self-contained animated HTML/SVG file |
 | `pasture-image.txt` | image | one HD illustration (same scene, same checklist) |
 | `fish-image.txt` | image | one HD illustration |
-| `pasture-video.txt` | video | one clip — same checklist, MOTION now literal (+ a SOUND section for audio-capable models) |
+| `pasture-video.txt` | video | one clip — same countable content, written as a CAPTION (see below) |
 | `fish-video.txt` | video | one clip |
+
+**Video prompts are captions, not checklists.** Text models read specs — headers, bullets,
+"exactly N" — and satisfy them item by item. Video diffusion models never read: the text encoder
+embeds the prompt like a training caption, so sectioned checklists are noise, numerals have no
+visual anchor, and unbound repetitions of a noun become clone-pressure (measured: every
+checklist-style fish prompt variant produced 3–5 identical fish; "never a third fish" made it
+WORSE — negations don't bind, tokens do). The video prompts therefore carry the SAME countable
+items as the image checklists, but woven into natural scene prose with every subject individuated
+as a character ("a big round orange fish… a much smaller slender green fish" — never a bare
+count). The checklist itself stays the JUDGING rubric; judge video clips against the matching
+image checklist.
 
 **Protocol — best of 3:**
 - Text models: 3 one-shot generations, save raw as generated (fix only syntax garbage that would
