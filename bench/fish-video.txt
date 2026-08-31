@@ -5,13 +5,12 @@ HARD REQUIREMENTS — the video must show ALL of them:
 
 CANVAS / COMPOSITION
 - Scene filling the whole frame, nothing important cropped at the edges.
-- Static or very gently moving camera — the full scene stays visible for the whole clip.
+- Static camera — the full scene stays visible for the whole clip.
 - Water gradient background: lighter blue near the top (the surface), darker blue near the bottom
   (the depths).
 - A sandy or rocky seafloor along the bottom (~10–15% of the frame), in tan/beige/brown.
 
-FISH — EXACTLY 2 fish in the entire scene: two and only two, never a third fish, no school, no
-background fish. Both fully visible, visibly different from each other. Each fish must be
+FISH — EXACTLY 2 fish in the entire scene: both fully visible, visibly different from each other. Each fish must be
 RECOGNIZABLE as a fish without any text label.
 
 Required features for EACH fish:
@@ -21,7 +20,7 @@ Required features for EACH fish:
 - Exactly 1 visible eye (with a pupil).
 - A mouth indication (small line, curve, or open shape).
 
-The two fish must be visually distinct:
+Both fish must be visually distinct:
 - Different colors.
 - Different sizes (one clearly larger than the other).
 - Different overall body shape (e.g., one round/short, one long/slender).
@@ -38,13 +37,10 @@ MOTION (actual movement over the clip — the animation is the point)
 - Both fish are swimming horizontally across the scene, each heading at its own pace, tails
   moving as they swim.
 - The LARGER fish swims across the upper half of the water; the SMALLER fish swims across the
-  lower half. Each keeps to its own depth for the whole clip — the two never meet, never touch,
-  never overlap and never block each other.
-- Both fish keep swimming for the entire clip — the motion never stops or freezes.
+  lower half. Each keeps to its own depth for the whole clip.
+- Fish keep swimming for the entire clip — the motion never stops or freezes.
 - The bubbles are rising toward the surface throughout the clip.
 - The seaweed sways gently.
-- The fish keep their shape and features while moving — no morphing, no fins appearing or
-  disappearing between frames; both fish stay fully visible.
 
 SOUND (if the model generates audio)
 - Calm underwater ambience matching the scene: soft bubbling, muffled water movement.
