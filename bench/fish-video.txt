@@ -1,0 +1,52 @@
+Generate a video clip of an underwater scene, in a clean flat-illustration style. No
+photorealism. No text, letters, numbers, labels, logos or watermarks anywhere in the video.
+
+HARD REQUIREMENTS — the video must show ALL of them:
+
+CANVAS / COMPOSITION
+- Scene filling the whole frame, nothing important cropped at the edges.
+- Static or very gently moving camera — the full scene stays visible for the whole clip.
+- Water gradient background: lighter blue near the top (the surface), darker blue near the bottom
+  (the depths).
+- A sandy or rocky seafloor along the bottom (~10–15% of the frame), in tan/beige/brown.
+
+FISH — exactly 2 fish, both fully visible, visibly different from each other. Each fish must be
+RECOGNIZABLE as a fish without any text label.
+
+Required features for EACH fish:
+- A body (oval, teardrop, or simple fish shape).
+- A triangular tail at the rear.
+- At least 1 fin (top dorsal fin OR side fin OR both).
+- Exactly 1 visible eye (with a pupil).
+- A mouth indication (small line, curve, or open shape).
+
+The two fish must be visually distinct:
+- Different colors.
+- Different sizes (one clearly larger than the other).
+- Different overall body shape (e.g., one round/short, one long/slender).
+
+BUBBLES
+- Streams of round bubbles rising toward the surface.
+- Bubbles vary in size.
+
+SEAWEED / PLANTS
+- At least 2 green seaweed plants rooted on the seafloor.
+- Each seaweed is a vertical wavy frond or a stack of overlapping leaf shapes suggesting a plant.
+
+MOTION (actual movement over the clip — the animation is the point)
+- Both fish are swimming horizontally across the scene, each heading at its own pace, tails
+  moving as they swim.
+- The bubbles are rising toward the surface throughout the clip.
+- The seaweed sways gently.
+- The fish keep their shape and features while moving — no morphing, no fins appearing or
+  disappearing between frames; both fish stay fully visible.
+
+SOUND (if the model generates audio)
+- Calm underwater ambience matching the scene: soft bubbling, muffled water movement.
+- No music with lyrics, no speech.
+
+STYLE / QUALITY
+- Clean flat-illustration / vector-art style: crisp shapes, flat colors, simple shading.
+- Soft light filtering down from the surface, calm friendly mood.
+- High-resolution HD render: sharp clean edges, no blur, no artifacts, no distorted anatomy,
+  masterpiece-quality animation, smooth motion, stable consistent frames.

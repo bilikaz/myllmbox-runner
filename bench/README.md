@@ -15,8 +15,8 @@ comparing models is arithmetic, not taste.
 | `fish-text.txt` | text/code | one self-contained animated HTML/SVG file |
 | `pasture-image.txt` | image | one HD illustration (same scene, same checklist) |
 | `fish-image.txt` | image | one HD illustration |
-
-The same scene specs extend to video models later (the MOTION sections become literal).
+| `pasture-video.txt` | video | one clip — same checklist, MOTION now literal (+ a SOUND section for audio-capable models) |
+| `fish-video.txt` | video | one clip |
 
 **Protocol — best of 3:**
 - Text models: 3 one-shot generations, save raw as generated (fix only syntax garbage that would
@@ -42,6 +42,13 @@ Speed is measured at ALL THREE standard resolutions, each as the 3-seed average:
   runs, not rescales. Qwen-Image-Edit quirk: avoid exactly 1024×1024 (the one known trap size —
   breaks only when output==input size AND a dim is exactly 1024).
 
+## The canonical clip (video models)
+
+One standard spec, every model: **1280×704, 121 frames @ 24fps (~5s)** — speed = the 3-seed
+average at that spec. (Dims snap to /64 on LTX-class two-stage pipelines — that's why 704, not
+720.) The committed `tests/` winners are `{pasture,fish}.mp4` at the canonical spec; audio, when
+the model makes it, is part of the judgment.
+
 ## Tools
 
 - **`gauntlet-image.py`** — the image gauntlet in one command:
@@ -50,6 +57,10 @@ Speed is measured at ALL THREE standard resolutions, each as the 3-seed average:
   timings. `--mode edit` (default) posts a generated blank-canvas reference to
   `/v1/images/edits`; `--mode generate` posts JSON to `/v1/images/generations`. Stdlib-only;
   run it on the serving box or through the tunnel (the management LAN blocks raw ports).
+- **`gauntlet-video.py`** — same idea for `/v1/videos` servers:
+  `./bench/gauntlet-video.py <ip:port|url> [--size 1280x704] [--frames 121] [--fps 24] [--token …]`
+  Both video prompts × the canonical seeds at the canonical clip spec, saves mp4s +
+  `run.json` to `results/<name>/`.
 - **`sweep.py`** — the LLM concurrency harness: one fixed prompt (+ nonce to defeat prefix
   caching) at increasing concurrency, client-side aggregate tok/s + acceptance from /metrics,
   ready-to-paste reports.md rows.

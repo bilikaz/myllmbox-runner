@@ -1,0 +1,91 @@
+Generate a video clip of a cheerful pasture scene with animals, in a clean flat-illustration
+style. No photorealism. No text, letters, numbers, labels, logos or watermarks anywhere in the
+video.
+
+HARD REQUIREMENTS — the video must show ALL of them:
+
+CANVAS / COMPOSITION
+- Landscape scene filling the whole frame, nothing cropped at the edges.
+- Static or very gently moving camera — the full scene stays visible for the whole clip.
+- A sky gradient background (light blue at top, transitioning to lighter blue/white near the
+  horizon) covering the upper ~65% of the frame.
+- A grass area (green, with subtle texture or gradient) covering the lower ~35%, with a clear
+  horizon line where they meet.
+
+SUN
+- A yellow circle in the upper portion of the sky.
+- Surrounded by a lighter yellow halo / glow.
+- At least 6 ray lines or triangles emanating outward from the sun.
+
+CLOUDS
+- At least 3 white or off-white clouds in the sky.
+- Each cloud clearly built from 3+ overlapping puffs/circles — NOT a single smooth shape.
+
+TREES
+- At least 2 trees rooted firmly on the grass (NOT floating in the sky or buried in the ground).
+- Each tree has:
+    * A brown trunk (rectangle or tapered shape).
+    * A green canopy (cluster of overlapping rounded shapes) that looks tree-like — not a green
+      blob on a brown stick.
+
+ANIMALS — exactly 4 distinct species, all visible at once. Each animal must be RECOGNIZABLE as its
+species WITHOUT a text label — a person glancing at the scene should say "that's a sheep, that's a
+cow."
+
+Required species and their non-negotiable identifying features:
+
+  COW
+    - Body: white/cream with at least 3 black patches/spots.
+    - Exactly 4 legs visible (this is critical — count them).
+    - 2 horns or 2 small ears on the head.
+    - 2 eyes.
+    - A pink udder OR a pink nose (cow-defining feature).
+
+  SHEEP
+    - Body: fluffy white wool drawn as many overlapping puffs — NOT a single smooth oval.
+    - Exactly 4 dark legs visible.
+    - A dark face (gray or black).
+    - 2 eyes.
+    - 2 ears.
+
+  PIG
+    - Body: pink, mostly oval/round.
+    - Exactly 4 legs visible.
+    - Pink snout (a small oval at the front of the face) with 2 nostrils.
+    - 2 small triangular ears.
+    - 2 eyes.
+    - A small curly tail.
+
+  HORSE
+    - Body: brown, longer than tall.
+    - Exactly 4 legs visible (longer than the cow/sheep/pig legs).
+    - Long neck.
+    - Visible mane (darker shape along the neck).
+    - 2 ears.
+    - 2 eyes.
+    - A tail at the rear.
+
+GENERAL ANIMAL RULES (apply to all 4):
+- All 4 animals on the grass, grounded by their shadows — not floating in the sky.
+- Animals roughly proportional to each other (a horse is not the same size as a pig; the pig is
+  the smallest).
+- No animals overlapping each other; spaced across the field.
+- Each animal has a clearly visible head/face turned toward the viewer or in profile.
+- Complete bodies — no animal cut off by the frame edge or hidden behind scenery.
+
+MOTION (actual movement over the clip — the animation is the point)
+- The animals are bouncing in place: each one hops up and lands repeatedly, each at a different
+  phase (not all in sync), staying in its own spot on the grass.
+- The clouds are drifting slowly across the sky.
+- The animals keep their shape and features while moving — no morphing, no limbs appearing or
+  disappearing between frames.
+
+SOUND (if the model generates audio)
+- Cheerful meadow ambience matching the scene: birdsong, a light breeze — calm, friendly.
+- No music with lyrics, no speech.
+
+STYLE / QUALITY
+- Clean flat-illustration / vector-art style: crisp shapes, flat colors, simple shading.
+- Bright daylight, friendly storybook mood.
+- High-resolution HD render: sharp clean edges, no blur, no artifacts, no distorted anatomy,
+  no extra limbs, masterpiece-quality animation, smooth motion, stable consistent frames.

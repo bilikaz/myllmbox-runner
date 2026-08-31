@@ -61,7 +61,9 @@ Scripts self-bootstrap `.venv` — never activate anything by hand. To stop a bo
    prompts (canonical texts in `bench/`): text models render `pasture.html` + `fish.html` (from
    `bench/pasture-text.txt` / `fish-text.txt`, one-shot, saved raw); image models generate
    `pasture.png` + `fish.png` (from `bench/pasture-image.txt` / `fish-image.txt`; edit-only models
-   take a plain reference input per their API). Best of 3 runs either way — for seeded generators
+   take a plain reference input per their API); video models generate `pasture.mp4` + `fish.mp4`
+   (from `bench/pasture-video.txt` / `fish-video.txt`, canonical clip 1280×704 · 121 frames @ 24).
+   Best of 3 runs either way — for seeded generators
    (image/video) the three runs use the CANONICAL SEEDS **123123123, 456456456, 789789789** (never
    default/0 — servers with a fixed default seed silently return the same image three times). The USER runs the
    generations (never fire them yourself — house rule); you commit the winners. Same checklist

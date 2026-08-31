@@ -151,13 +151,15 @@ Old yamls (`recipe_version: "1"`, `container:`, `mods:`, `run-recipe.sh`, LAN po
 facts (quant config, skip_modules, defaults, verified timings); rewrite the plumbing. Endpoints are
 reached through the tunnel URL now, never `http://<host>:8001`.
 
-## The gauntlet (every text-model recipe)
+## The gauntlet (every model recipe)
 
 A recipe isn't done until `tests/` holds the TWO standing gauntlet outputs (canonical prompts in
 `bench/`): text models render `pasture.html` + `fish.html` (bench/pasture-text.txt / fish-text.txt,
 one-shot, raw HTML as generated); image models generate `pasture.png` + `fish.png`
 (bench/pasture-image.txt / fish-image.txt — HD-quality directives included; edit-only models take a
-plain reference input per their API). Best of 3 runs each; for seeded generators the three runs use
+plain reference input per their API); video models generate `pasture.mp4` + `fish.mp4`
+(bench/pasture-video.txt / fish-video.txt — MOTION literal, SOUND judged when the model makes audio;
+canonical clip 1280×704 · 121 frames @ 24, via bench/gauntlet-video.py). Best of 3 runs each; for seeded generators the three runs use
 the CANONICAL SEEDS 123123123 / 456456456 / 789789789 (never the server default — a fixed default
 seed returns the identical image three times). The USER runs the generations (never
 fire test load yourself); commit their picked winners. Same checklist scenes across every model =

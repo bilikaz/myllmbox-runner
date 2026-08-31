@@ -1,0 +1,61 @@
+# LTX-2.3 — Lightricks 22B audio+video DiT on a single DGX Spark (GB10/SM121). Video WITH synchronized sound.
+#
+# Ported from the old eugr recipe (old-eugr/x/ltx-2.3-video.yaml + servers/ltx-video, VERIFIED 2026-07-20 on ai1:
+# 5s 1280×704@24 clip ≈ 91s steady / 117s warm-up, h264 + real synthesized AAC audio) into our recipes/ structure.
+# Same server.py, same distilled two-stage pipeline; the Dockerfile is rebased on the house serve stack.
+# ⚠ The July numbers are from the OLD build — re-measure on this port before they go on a model card.
+#
+# Serves the DISTILLED-1.1 checkpoint via ltx_pipelines.DistilledPipeline: stage 1 at half resolution
+# (8 sigmas) → 2x spatial upsample → stage 2 refine (4 sigmas), CFG-free. Text-to-video AND image-to-video
+# (multipart conditioning images = keyframes: 1st → frame 0, 2nd → last frame; verified in-betweening).
+#
+# GENERIC-server recipe (not vLLM): uvicorn runs server.py's FastAPI app; the runner fronts it with the
+# keepalive proxy + cloudflared tunnel (server.py also emits keepalive whitespace — generation takes minutes).
+#
+# PLACEMENT: SOLO — the MEDIA slot. Video (this) and image (qwen-image-edit / flux2-dev) are ALTERNATIVES:
+# swap, never co-host two media serves. fp8-cast halves the 22B transformer (~22GB vs ~44GB); the pipeline
+# trims aggressively between requests (~1GB idle in July tests — generation peak is what matters).
+#
+# Two steps (self-provisioning): ./build-and-copy.sh ltx-2.3  →  ./run.sh ltx-2.3
+# (run.sh downloads Lightricks/LTX-2.3 + the ungated gemma mirror below if missing — no manual ./download.sh)
+
+server:
+  image: mbx-ltx-2.3                                    # built from this recipe's Dockerfile (LTX-2 monorepo stack)
+  model: /models/Lightricks/LTX-2.3                     # the full checkpoint repo (distilled + upscalers, ~147G)
+  cache: recipes/ltx-2.3/.data/cache                    # recipe-OWNED scratch -> /cache (never write into models/)
+  uvicorn:                                              # GENERIC FastAPI server → uvicorn <app> --host --port
+    app: server:app
+    host: 0.0.0.0
+    port: 8000                                          # uniform serve port (same as vLLM → uniform proxy front)
+
+  env:
+    MODEL_ROOT: /models/Lightricks/LTX-2.3
+    LTX_CHECKPOINT: /models/Lightricks/LTX-2.3/ltx-2.3-22b-distilled-1.1.safetensors
+    LTX_SPATIAL_UPSCALER: /models/Lightricks/LTX-2.3/ltx-2.3-spatial-upscaler-x2-1.1.safetensors
+    # Text encoder = Gemma-3-12B. google/gemma-3-12b-it is GATED; this is the UNGATED Lightricks
+    # mirror (QAT-unquantized bf16) — provisioned via extra_models below.
+    GEMMA_ROOT: /models/Lightricks/gemma-3-12b-it-qat-q4_0-unquantized
+    SERVED_MODEL_NAME: Lightricks/LTX-2.3
+
+    # fp8-cast: fp8 weight storage, bf16 compute → 22B transformer ~22GB instead of ~44GB. This is the
+    # pipeline's OWN cast-at-load (ltx_pipelines quantization_factory), not our torchao quantizer — no
+    # ./quantize.sh step, nothing pre-quantized on disk. "none" = BF16. fp8-scaled-mm = fp8 matmuls
+    # (untested on GB10 — the July TODO; A/B it before trusting output).
+    LTX_QUANTIZATION: fp8-cast
+    LTX_OFFLOAD: none
+
+    # ~5s @ 24fps, 1280×704 — the canonical video bench clip (bench/README.md). Constraints the server
+    # snaps to: H/W divisible by 64 (stage 1 runs at half res), num_frames = 8k+1. Per-request overrides
+    # via form fields (width/height/num_frames/frame_rate/seed).
+    DEFAULT_WIDTH: "1280"
+    DEFAULT_HEIGHT: "704"
+    DEFAULT_FRAMES: "121"
+    DEFAULT_FPS: "24"
+
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+
+# Additional weights this recipe needs PRESENT beyond the main model — ./run.sh downloads any missing ones.
+extra_models:
+  - Lightricks/gemma-3-12b-it-qat-q4_0-unquantized      # → GEMMA_ROOT above (the ungated Gemma-3-12B mirror)
