@@ -58,10 +58,21 @@ length is constant: **121 frames @ 24fps = 5s**. Two speed tiers (3-seed average
 the showcase tier once a first run proves the 121-frame VAE decode fits in memory; no QHD for
 video. Winners → `tests/{pasture,fish}.mp4`.
 
+## Port status (2026-08-31)
+
+**VERIFIED on v1.3.0**: the pinned release renamed the whole `DistilledPipeline` surface vs the
+July HEAD (`model_paths=ModelPaths.from_monolith(...)`, `PipelineOutput` NamedTuple, `AUTO_TILING`)
+— server.py is adapted and a real clip confirms it: 1280×704 × 121f, h264 + AAC, **123.8s
+warm-up** (July: 117s). Steady-state + FHD tier still to measure (the gauntlet).
+Boot prints `Uninitialized parameters or buffers: [...modality_emb, attention_pooler...]` —
+that's v1.3.0's **duration-predictor head** (AutoDuration), absent from the distilled monolith
+and never used here (we always pass explicit `num_frames`). Harmless.
+
 ## Knobs & TODO (carried from July)
 
 - `LTX_QUANTIZATION`: `fp8-cast` (verified) · `none` = BF16 · `fp8-scaled-mm` = fp8 matmuls,
-  **untested on GB10** — A/B before trusting.
+  **untested on GB10** — A/B before trusting. v1.3.0 adds `nvfp4-cast` / `nvfp4-prequant` —
+  untested, potentially the GB10 4× story; worth an A/B once the fp8-cast baseline is measured.
 - Untested backlog: temporal upscaler (2× fps), IC-LoRA (`lora-384-1.1`), generation-peak memory
   measurement (gates any LLM co-hosting idea).
 - Dockerfile torch trio is nightly-unpinned (no torchaudio pin was recorded in July) — freeze the

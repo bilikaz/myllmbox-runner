@@ -87,11 +87,15 @@ print(f"  upscaler: {UPSCALER}", flush=True)
 print(f"  gemma:    {GEMMA_ROOT}", flush=True)
 print(f"  quantization={QUANT or 'none'} offload={OFFLOAD}", flush=True)
 
+# v1.3.0 API (the July build used an older HEAD): pipeline takes ModelPaths.from_monolith
+# instead of bare checkpoint/gemma paths, returns a PipelineOutput NamedTuple instead of a
+# (video, audio) pair, and tiling defaults to AUTO_TILING (no TilingConfig.default()).
 from ltx_pipelines.distilled import DistilledPipeline  # noqa: E402
 from ltx_pipelines.utils.args import ImageConditioningInput  # noqa: E402
+from ltx_pipelines.utils.model_paths import ModelPaths  # noqa: E402
 from ltx_pipelines.utils.types import OffloadMode  # noqa: E402
 from ltx_pipelines.utils.media_io import encode_video  # noqa: E402
-from ltx_core.model.video_vae import TilingConfig, get_video_chunks_number  # noqa: E402
+from ltx_core.model.video_vae import AUTO_TILING, get_video_chunks_number  # noqa: E402
 
 quant_policy = None
 if QUANT and QUANT not in ("none", "off", "bf16"):
@@ -108,13 +112,16 @@ try:
 except ValueError:
     print(f"  unknown offload '{OFFLOAD}', using none", flush=True)
 
+# PROMPT_ENHANCER: pass the gemma root to the enhancer too so enhance_prompt=true works
+# (same weights as the text encoder; set LTX_PROMPT_ENHANCER=0 if it ever double-loads).
+_enhancer_root = GEMMA_ROOT if os.environ.get("LTX_PROMPT_ENHANCER", "1") != "0" else None
 pipe = DistilledPipeline(
-    distilled_checkpoint_path=CKPT,
+    model_paths=ModelPaths.from_monolith(CKPT, gemma_root=GEMMA_ROOT),
     spatial_upsampler_path=UPSCALER,
-    gemma_root=GEMMA_ROOT,
-    loras=(),
+    loras=[],
     quantization=quant_policy,
     offload_mode=offload_mode,
+    prompt_enhancer_gemma_root=_enhancer_root,
 )
 print("pipeline loaded: DistilledPipeline (LTX-2.3)", flush=True)
 
@@ -148,11 +155,9 @@ def _run(prompt, image_paths, width, height, num_frames, frame_rate, seed,
     if images:
         print(f"  conditioning: {[(im.frame_idx, im.strength) for im in images]}",
               flush=True)
-    tiling_config = TilingConfig.default()
-    chunks = get_video_chunks_number(num_frames, tiling_config)
     t0 = time.time()
     with _gpu_lock, torch.inference_mode():
-        video, audio = pipe(
+        result = pipe(
             prompt=prompt,
             seed=seed,
             height=height,
@@ -160,18 +165,19 @@ def _run(prompt, image_paths, width, height, num_frames, frame_rate, seed,
             num_frames=num_frames,
             frame_rate=frame_rate,
             images=images,
-            tiling_config=tiling_config,
+            tiling_config=AUTO_TILING,
             enhance_prompt=enhance_prompt,
         )
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
             out_path = f.name
         try:
             encode_video(
-                video=video,
+                video=result.video,
                 fps=frame_rate,
-                audio=audio,
+                audio=result.audio,
                 output_path=out_path,
-                video_chunks_number=chunks,
+                video_chunks_number=get_video_chunks_number(
+                    result.num_frames, result.tiling_config),
             )
             with open(out_path, "rb") as f:
                 mp4 = f.read()
