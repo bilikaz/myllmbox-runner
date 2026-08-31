@@ -6,11 +6,13 @@ Loads a PRE-QUANTIZED NVFP4 transformer made by ./quantize.sh (QUANT_PRELOADED=1
 — or, unset, quantizes on the fly / runs BF16 (same machinery as flux2-dev).
 Modeled on the FLUX.2 server; the deltas are Qwen's call signature
 (true_cfg_scale + negative_prompt + guidance_scale=1.0, multi-image `image=[...]`)
-and that this is an EDIT model — it always needs an input image.
+and that this is an EDIT model — the pipeline always needs an input image (generations
+synthesizes a blank canvas so text→image works anyway).
 
 Endpoints mirror the OpenAI Images API so standard OpenAI clients work:
   POST /v1/images/edits        (multipart form)   image edit / multi-reference  [primary]
-  POST /v1/images/generations  (JSON)             -> 400 (edit model needs an image)
+  POST /v1/images/generations  (JSON)             text->image: the server synthesizes a blank
+                                                  canvas and routes through the edit path
   GET  /health , GET /v1/models
 
 Bearer gating happens at the keepalive-proxy hop, not here.
@@ -357,15 +359,34 @@ class GenerationsRequest(BaseModel):
     n: int = 1
     size: str = "auto"
     response_format: str = "b64_json"
+    seed: int = 0
+    steps: int = DEFAULT_STEPS
+    true_cfg_scale: float = DEFAULT_TRUE_CFG
+    guidance: float = DEFAULT_GUIDANCE
+    negative_prompt: str = DEFAULT_NEGATIVE
+
+
+# Text→image on an EDIT model: the checkpoint always wants a conditioning image, so the
+# server synthesizes a near-white canvas at the output size and routes through the same
+# edit path — the gauntlet-proven trick (bench/gauntlet-image.py --mode edit fed exactly
+# this canvas and the renders beat FLUX), now server-side so any stock Images-API client
+# just works. A blank canvas still conditions (its tone/aspect seed the composition),
+# and generation is immune to the ≤1024 edit floor (see the note above _parse_size).
+GEN_CANVAS_RGB = (250, 250, 248)
 
 
 @app.post("/v1/images/generations")
 def images_generations(req: GenerationsRequest):
-    # Qwen-Image-Edit is an EDIT model — it requires at least one input image.
-    raise HTTPException(
-        400,
-        "Qwen-Image-Edit-2511 is an image-EDIT model and requires an input image. "
-        "Use POST /v1/images/edits (multipart) with one or more `image` fields.")
+    t0 = time.time()
+    w, h = _parse_size(req.size)
+    if w is None:  # no input image to inherit an aspect from → square at EDIT_AUTO_PIXELS
+        side = max(16, int(round((EDIT_AUTO_PIXELS or 1328 * 1328) ** 0.5 / 16)) * 16)
+        w = h = side
+    canvas = Image.new("RGB", (w, h), GEN_CANVAS_RGB)
+    return _streaming_json(
+        lambda: _payload(
+            _run(req.prompt, [canvas], req.steps, req.true_cfg_scale, req.guidance,
+                 req.negative_prompt, w, h, req.seed, req.n), t0))
 
 
 @app.post("/v1/images/edits")

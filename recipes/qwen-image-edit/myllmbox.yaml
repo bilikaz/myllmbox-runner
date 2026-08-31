@@ -14,7 +14,9 @@
 # keepalive whitespace so Cloudflare's ~100s idle timeout never fires on long edits). SOLO — one Spark; this
 # takes the media slot (swap in when the FLUX/LLM slot is free), it does NOT co-host with a TP LLM serve.
 #
-# EDIT-ONLY model: every request needs >=1 input image → POST /v1/images/edits (multipart). Non-Commercial weights.
+# EDIT-conditioned model: POST /v1/images/edits (multipart, >=1 input image) is the primary surface, and
+# POST /v1/images/generations (JSON) works too — server.py synthesizes a blank canvas and routes it through
+# the edit path (the gauntlet-proven trick), so text→image clients need no special handling. Non-Commercial weights.
 
 server:
   image: mbx-qwen-image-edit                            # built from this recipe's Dockerfile (torchao serve stack)

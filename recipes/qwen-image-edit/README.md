@@ -31,8 +31,10 @@ Everything self-provisions: `quantize.sh` fetches the base, `run.sh` fetches the
 
 ## What it is
 
-- **Base:** `Qwen/Qwen-Image-Edit-2511` — Qwen-Image MMDiT multi-image edit model. **Edit-only**: every request
-  needs ≥1 input image → `POST /v1/images/edits` (multipart). `/v1/images/generations` returns 400.
+- **Base:** `Qwen/Qwen-Image-Edit-2511` — Qwen-Image MMDiT multi-image edit model. The pipeline is
+  edit-conditioned (always wants ≥1 input image → `POST /v1/images/edits`, multipart), but the server also
+  serves **`POST /v1/images/generations`** (JSON): it synthesizes a near-white canvas at the output size and
+  routes through the edit path — the gauntlet-proven blank-canvas trick, so stock text→image clients just work.
 - **Quant:** transformer → NVFP4 (torchao, Triton sm_121a), VAE/text-encoder kept BF16. ~10–12 GB vs ~40 GB BF16.
 - **LoRA:** `lightx2v/Qwen-Image-Edit-2511-Lightning` (4-step) applied **unfused** at serve time (BF16 adapter
   over the quantized transformer). Declared in `extra_models:`, pointed at by `LORA_PATH`. Requires the
@@ -62,6 +64,10 @@ If a future build needs a newer diffusers, bump **both** Dockerfiles together an
 ```bash
 curl -F prompt="make it snowy" -F image=@in.png -F size=auto \
   http://192.168.1.66:8000/v1/images/edits
+# text→image (server feeds a blank canvas internally):
+curl -H "Content-Type: application/json" \
+  -d '{"prompt":"a lighthouse at dusk, HD illustration","size":"1920x1080","seed":123123123}' \
+  http://192.168.1.66:8000/v1/images/generations
 # via the tunnel/proxy: add  -H "Authorization: Bearer $BINDING_TOKEN"
 # watch the boot log for:  "LoRA loaded (unfused adapter)"
 ```
