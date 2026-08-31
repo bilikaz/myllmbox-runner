@@ -31,9 +31,9 @@ individuated as a character ("a big round orange fish… a much smaller slender 
 a bare count). The image captions are the video captions minus motion/sound (motion becomes a
 still cue: "caught mid-hop").
 
-> Committed image winners generated before the caption rewrite (flux2-dev, qwen-image-edit
-> `tests/`) are checklist-era — re-gauntlet them under the captions when the media slot next
-> serves each model (bench debt; FLUX's missing pig+horse is the expected beneficiary).
+> Caption re-gauntlet DONE 2026-08-31 for both image models: FLUX's missing pig+horse came back
+> (roster 3/3 seeds), qwen's motion cue now renders (all four animals mid-bounce on the winning
+> seed). Standing cross-model datapoint: fish swim DIRECTIONS — qwen 3/3 correct, FLUX 0/3.
 
 **Protocol — best of 3:**
 - Text models: 3 one-shot generations, save raw as generated (fix only syntax garbage that would
