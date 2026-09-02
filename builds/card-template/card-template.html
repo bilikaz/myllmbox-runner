@@ -1,0 +1,228 @@
+<title>Flash-Next Release Card</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=JetBrains+Mono:wght@400;600;700&display=swap">
+<style>
+  :root{
+    --ground:#0b0e13; --card:#10141b; --panel:#161c25; --line:#242c38;
+    --text:#e9eef5; --muted:#8b96a4; --dim:#5b6673;
+    --green:#a8e830; --orange:#fb923c;
+    --gold1:#e8d5a6; --gold2:#c9a86a; --gold3:#8a6f42;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--ground);color:var(--text);font-family:Archivo,system-ui,sans-serif;
+       min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+  .card{width:min(1500px,100%);background:var(--card);border:1px solid var(--line);
+        border-radius:18px;padding:44px 52px 36px;position:relative;overflow:hidden}
+  .mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+
+  .hdr{display:flex;align-items:center;gap:18px;margin-bottom:26px}
+  .ring{width:40px;height:40px;border-radius:50%;border:6px solid #d43a3a}
+  .brand{font-weight:900;font-size:22px;letter-spacing:.04em;color:var(--green)}
+  .hdr .mono{font-size:13px;color:var(--muted);letter-spacing:.08em}
+  .hdr .site{margin-left:auto}
+
+  /* top: left = title + dials, right = spark photo */
+  .top{display:grid;grid-template-columns:1fr 360px;gap:36px;align-items:start}
+  .eyebrow{font-size:20px;color:var(--dim);font-weight:600;margin-bottom:2px}
+  h1{font-weight:900;font-stretch:80%;font-size:clamp(38px,5.6vw,78px);line-height:.95;text-wrap:balance}
+  .kicker{margin-top:14px;font-size:15px;letter-spacing:.14em;font-weight:700}
+  .kicker b{color:var(--green)}
+  .chips{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+  .chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;
+        padding:7px 15px;font-size:14px;font-weight:700}
+
+  .dials{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:26px}
+  .dial{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px 16px}
+  .dial .v{font-weight:900;font-size:50px;line-height:1;font-variant-numeric:tabular-nums}
+  .dial .u{font-size:16px;color:var(--muted);font-weight:600;margin-left:6px}
+  .dial .l{margin-top:10px;font-size:12px;letter-spacing:.15em;color:var(--muted);font-weight:600}
+  .v.green{color:var(--green)} .v.orange{color:var(--orange)}
+
+  .sparkbox{position:relative;display:flex;flex-direction:column;align-items:center;gap:12px;padding-top:6px}
+  .sparkbox img{width:340px;height:auto;filter:drop-shadow(0 18px 34px rgba(0,0,0,.6))}
+  .sparkbox .cap{font-size:12px;letter-spacing:.22em;color:var(--muted)}
+  .rosette{position:absolute;bottom:-10px;right:-8px;width:110px;filter:drop-shadow(0 6px 14px rgba(0,0,0,.5))}
+
+  .chartwrap{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+             padding:20px 24px 10px;margin-top:26px}
+  .chartwrap .chead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+  .chead .t{font-size:13px;letter-spacing:.18em;color:var(--muted);font-weight:600}
+  .chead .legend{display:flex;gap:18px;font-size:12px;color:var(--muted)}
+  .legend i{display:inline-block;width:18px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+  #chart{width:100%;height:230px;display:block}
+
+  .hw{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-top:16px;
+      border:1px solid var(--line);border-radius:12px;padding:14px 22px;background:var(--panel)}
+  .hw .l{font-size:12px;letter-spacing:.18em;color:var(--muted);font-weight:600}
+  .hw .v{font-weight:800;font-size:17px}
+  .hw .v b{color:var(--green)}
+  .hw .links{text-align:right;font-size:14px;font-weight:700;line-height:1.7}
+  .hw .links span{color:var(--green)}
+  .foot{margin-top:14px;font-size:13px;color:var(--dim)}
+</style>
+
+<div class="card">
+  <div class="hdr">
+    <div class="ring"></div>
+    <span class="brand">MY LLM BOX</span>
+    <span class="mono">GB10 SPARK · MEASURED SERVE</span>
+    <span class="mono site">myllmbox.com</span>
+  </div>
+
+  <div class="top">
+    <div>
+      <div class="eyebrow">Qwen /</div>
+      <h1>Qwen3.8-Flash-Next</h1>
+      <div class="kicker mono">180B MODEL · <b>UNDER 128 GB RAM</b> · ONE BOX</div>
+      <div class="chips mono">
+        <span class="chip">vLLM</span>
+        <span class="chip">hibrid46 · 4.35-bit</span>
+        <span class="chip">int3 PLE in-checkpoint</span>
+        <span class="chip">262K native ctx</span>
+        <span class="chip">1 node</span>
+      </div>
+      <div class="dials">
+        <div class="dial"><span class="v green" id="peakv">305</span><span class="u">tok/s</span>
+          <div class="l mono" id="peakl">PEAK DECODE · C=32</div></div>
+        <div class="dial"><span class="v orange">3.0K</span><span class="u">tok/s</span>
+          <div class="l mono">INGEST · WARM PREFILL</div></div>
+        <div class="dial"><span class="v">612K</span><span class="u">tok</span>
+          <div class="l mono">KV POOL · BF16 · 262K CTX</div></div>
+      </div>
+    </div>
+
+    <div class="sparkbox">
+      <img src="__SPARK_PNG__" alt="NVIDIA DGX Spark">
+      <div class="cap mono">SINGLE DGX SPARK · GB10</div>
+      <svg class="rosette" viewBox="0 0 110 132" aria-label="x1 single-Spark champion badge">
+        <defs>
+          <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#e05252"/><stop offset=".6" stop-color="#c23434"/>
+            <stop offset="1" stop-color="#8f1f1f"/>
+          </linearGradient>
+          <linearGradient id="ribbon" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#e05252"/><stop offset="1" stop-color="#8f1f1f"/>
+          </linearGradient>
+        </defs>
+        <g transform="translate(55,54)">
+          <g id="pts"></g>
+          <circle r="46" fill="url(#gold)"/>
+          <circle r="37" fill="#160b0b"/>
+          <circle r="34" fill="none" stroke="#e05252" stroke-width="2"/>
+          <text y="13" text-anchor="middle" font-family="Archivo" font-weight="900" font-size="36"
+                fill="#ffffff">×1</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <div class="chartwrap">
+    <div class="chead">
+      <span class="t mono">AGGREGATE DECODE THROUGHPUT vs CONCURRENT REQUESTS</span>
+      <span class="legend mono"><span><i style="background:var(--green)"></i>aggregate tok/s</span>
+      <span><i style="background:var(--dim)"></i>per-stream</span></span>
+    </div>
+    <svg id="chart" viewBox="0 0 1380 230" preserveAspectRatio="none"></svg>
+  </div>
+
+  <div class="hw">
+    <div>
+      <div class="l mono">HARDWARE</div>
+      <div class="v">NVIDIA DGX Spark · GB10 <b>× 1</b> · ~105 GB used at full load</div>
+    </div>
+    <div class="links mono">
+      <span>hf.co/myllmbox</span> / Qwen3.8-Flash-Next-hibrid46<br>
+      <span>github.com/bilikaz</span> / qwen38-flash-next-recipe
+    </div>
+  </div>
+
+</div>
+
+<script>
+// gold rosette points
+(() => {
+  const g = document.getElementById('pts'); let d = '';
+  for (let i = 0; i < 14; i++) {
+    const a = i / 14 * Math.PI * 2;
+    const x1 = Math.cos(a) * 44, y1 = Math.sin(a) * 44;
+    const xm = Math.cos(a + Math.PI / 14) * 53, ym = Math.sin(a + Math.PI / 14) * 53;
+    d += `M${x1.toFixed(1)} ${y1.toFixed(1)} L${xm.toFixed(1)} ${ym.toFixed(1)} `;
+  }
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  p.setAttribute('d', d); p.setAttribute('stroke', 'url(#gold)');
+  p.setAttribute('stroke-width', '10'); p.setAttribute('fill', 'none');
+  g.appendChild(p);
+})();
+
+// ── THE LADDER ── set v + pending:false for 24/32/48 when the sweep lands ──
+const LADDER = [
+  { c: 1,  v: 55,    pending: false },
+  { c: 2,  v: 78.7,  pending: false },
+  { c: 3,  v: 90.2,  pending: false },
+  { c: 4,  v: 113.1, pending: false },
+  { c: 5,  v: 116.3, pending: false },
+  { c: 6,  v: 128.6, pending: false },
+  { c: 8,  v: 167.5, pending: false },
+  { c: 12, v: 185.1, pending: false },
+  { c: 16, v: 228.7, pending: false },
+  { c: 20, v: 256.6, pending: false },
+  { c: 24, v: 280,   pending: false },
+  { c: 28, v: 293.2, pending: false },
+  { c: 32, v: 305.1, pending: false },
+];
+
+(() => {
+  const svg = document.getElementById('chart');
+  const W = 1380, H = 230, padL = 56, padR = 30, padT = 26, padB = 34;
+  const known = LADDER.filter(p => p.v != null);
+  const maxV = Math.max(...known.map(p => p.v)) * 1.15;
+  const xs = i => padL + i * (W - padL - padR) / (LADDER.length - 1);
+  const ys = v => H - padB - (v / maxV) * (H - padT - padB);
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (t, a) => { const e = document.createElementNS(NS, t);
+    for (const k in a) e.setAttribute(k, a[k]); svg.appendChild(e); return e; };
+
+  for (let g = 0; g <= 4; g++) {
+    const y = padT + g * (H - padT - padB) / 4;
+    el('line', { x1: padL, y1: y, x2: W - padR, y2: y, stroke: '#232c38', 'stroke-width': 1 });
+    const t = el('text', { x: padL - 10, y: y + 4, 'text-anchor': 'end', fill: '#5b6673',
+      'font-size': 12, 'font-family': 'JetBrains Mono' });
+    t.textContent = Math.round(maxV * (1 - g / 4));
+  }
+  LADDER.forEach((p, i) => {
+    const t = el('text', { x: xs(i), y: H - 12, 'text-anchor': 'middle', fill: '#8b96a4',
+      'font-size': 13, 'font-weight': 600, 'font-family': 'JetBrains Mono' });
+    t.textContent = p.c;
+  });
+
+  const pts = known.map(p => [xs(LADDER.indexOf(p)), ys(p.v)]);
+  el('path', { d: `M${pts[0][0]} ${H - padB} ` + pts.map(p => `L${p[0]} ${p[1]}`).join(' ') +
+    ` L${pts[pts.length - 1][0]} ${H - padB} Z`, fill: 'rgba(168,232,48,.10)' });
+  el('path', { d: 'M' + pts.map(p => `${p[0]} ${p[1]}`).join(' L'), fill: 'none',
+    stroke: 'var(--green)', 'stroke-width': 3.5, 'stroke-linejoin': 'round' });
+
+  const pend = LADDER.filter(p => p.pending);
+  if (pend.length) {
+    const lastK = pts[pts.length - 1];
+    el('path', { d: `M${lastK[0]} ${lastK[1]} L${xs(LADDER.length - 1)} ${padT + 8}`,
+      stroke: 'var(--green)', 'stroke-width': 2, 'stroke-dasharray': '3 7', fill: 'none', opacity: .45 });
+    pend.forEach(p => el('circle', { cx: xs(LADDER.indexOf(p)), cy: padT + 10,
+      r: 5, fill: 'none', stroke: '#5b6673', 'stroke-width': 2, 'stroke-dasharray': '2 3' }));
+    const t = el('text', { x: xs(LADDER.length - 2), y: padT + 34, 'text-anchor': 'middle',
+      fill: '#5b6673', 'font-size': 12, 'font-family': 'JetBrains Mono' });
+    t.textContent = '';
+  }
+
+  known.forEach(p => el('circle', { cx: xs(LADDER.indexOf(p)), cy: ys(p.v), r: 5,
+    fill: '#10141b', stroke: 'var(--green)', 'stroke-width': 3 }));
+  const ps = known.map(p => [xs(LADDER.indexOf(p)), ys(p.v / p.c)]);
+  el('path', { d: 'M' + ps.map(p => `${p[0]} ${p[1]}`).join(' L'), fill: 'none',
+    stroke: '#5b6673', 'stroke-width': 2, opacity: .8 });
+
+  const last = known[known.length - 1];
+  const bx = xs(LADDER.indexOf(last)), by = ys(last.v);
+  el('rect', { x: bx - 128, y: by - 42, width: 118, height: 28, rx: 6, fill: 'var(--green)' });
+  const bt = el('text', { x: bx - 69, y: by - 22, 'text-anchor': 'middle', fill: '#0b0e13',
+    'font-size': 15, 'font-weight': 800, 'font-family': 'JetBrains Mono' });
+  bt.textContent = `${last.v} tok/s`;
+})();
+</script>
