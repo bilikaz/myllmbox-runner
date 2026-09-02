@@ -18,6 +18,7 @@ tensor at a time (safe alongside a serve); needs free disk = checkpoint size.
 import argparse
 import json
 import os
+import re
 import shutil
 
 import torch
@@ -30,10 +31,31 @@ def main() -> None:
     ap.add_argument("src", help="hibrid checkpoint dir (with model.safetensors.index.json)")
     ap.add_argument("dst", help="output dir for the clean repo")
     ap.add_argument("--shard-gb", type=float, default=4.0, help="target shard size (GB, default 4)")
+    ap.add_argument("--strip", default=None,
+                    help="regex: tensors whose NAME matches are dropped from the repo entirely "
+                         "(shards AND index). e.g. the 128 bf16 PLE bank shards when the repo "
+                         "ships the table pre-quantized (see --qbits-*).")
+    ap.add_argument("--qbits-dir", default=None,
+                    help="dir with raw quantized-PLE artifacts (*.packed/*.scales/*.mins) to embed "
+                         "as ORDINARY checkpoint tensors (<prefix>.qbits_packed/_scales/_mins) and "
+                         "declare in config.json as ple_quantization — the standard shipping format.")
+    ap.add_argument("--qbits-prefix",
+                    default="model.language_model.layers.1.ple.ple_embedding.ngram_embedding",
+                    help="tensor-name prefix for the embedded qbits tensors")
+    ap.add_argument("--qbits-bits", type=int, default=3)
+    ap.add_argument("--qbits-group", type=int, default=160)
+    ap.add_argument("--qbits-rows", type=int, default=320001536)
+    ap.add_argument("--qbits-dim", type=int, default=160)
     a = ap.parse_args()
 
     idx = json.load(open(os.path.join(a.src, "model.safetensors.index.json")))
     weight_map: dict[str, str] = idx["weight_map"]
+    if a.strip:
+        rx = re.compile(a.strip)
+        dropped = [n for n in weight_map if rx.search(n)]
+        for n in dropped:
+            del weight_map[n]
+        print(f"  --strip {a.strip!r}: dropping {len(dropped)} tensors from the repo")
     os.makedirs(a.dst, exist_ok=True)
 
     # group tensors by their OWNING file (per the index — the single source of truth),
@@ -74,6 +96,29 @@ def main() -> None:
                 buf[name] = t
                 buf_bytes += nbytes
                 total += nbytes
+
+    if a.qbits_dir:
+        import glob
+        V, D, bits, group = a.qbits_rows, a.qbits_dim, a.qbits_bits, a.qbits_group
+        bpr = {2: D // 4, 3: (D // 8) * 3, 4: D // 2}[bits]
+        G = D // group
+        find = lambda ext: glob.glob(os.path.join(a.qbits_dir, f"*.{ext}"))[0]  # noqa: E731
+        emit = {
+            f"{a.qbits_prefix}.qbits_packed":
+                torch.from_file(find("packed"), shared=True, size=V * bpr, dtype=torch.uint8).view(V, bpr),
+            f"{a.qbits_prefix}.qbits_scales":
+                torch.from_file(find("scales"), shared=True, size=V * G, dtype=torch.float16).view(V, G),
+            f"{a.qbits_prefix}.qbits_mins":
+                torch.from_file(find("mins"), shared=True, size=V * G, dtype=torch.float16).view(V, G),
+        }
+        for name, t in emit.items():
+            nbytes = t.numel() * t.element_size()
+            if buf and buf_bytes + nbytes > limit:
+                flush()
+            buf[name] = t
+            buf_bytes += nbytes
+            total += nbytes
+            print(f"  embedding {name}: {nbytes/2**30:.2f} GiB")
     flush()
 
     # final names carry the count (HF convention), rewrite map accordingly
@@ -92,6 +137,14 @@ def main() -> None:
         if os.path.isfile(p):
             shutil.copy2(p, os.path.join(a.dst, f))
             print(f"  copied {f}")
+
+    if a.qbits_dir:
+        cfg_p = os.path.join(a.dst, "config.json")
+        cfg = json.load(open(cfg_p))
+        cfg["ple_quantization"] = {"bits": a.qbits_bits, "group": a.qbits_group,
+                                   "rows": a.qbits_rows, "dim": a.qbits_dim}
+        json.dump(cfg, open(cfg_p, "w"), indent=2)
+        print("  config.json: ple_quantization declared")
 
     print(f"done: {shard_i} clean shards, {total/2**30:.2f} GiB -> {a.dst}")
     print("every tensor exists exactly once (stock-loader safe); upload with: hf upload <repo> " + a.dst)

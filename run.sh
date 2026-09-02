@@ -112,10 +112,12 @@ if [ -n "$MODEL" ]; then
   HOSTPATH="$MODELS_DIR/$(strip "$MODEL")"
   if [ -d "$HOSTPATH" ] && [ -n "$(ls -A "$HOSTPATH" 2>/dev/null)" ]; then
     echo "· model present: $HOSTPATH"
-  elif [[ "$MODEL" == */myllmbox/* ]]; then
-    echo "· $MODEL is a myllmbox quant and isn't built yet → quantizing (quantize.sh fetches its source)"
+  elif [[ "$MODEL" == */myllmbox/* ]] && grep -q '^quantize:' "recipes/$R/myllmbox.yaml"; then
+    echo "· $MODEL is a myllmbox quant with a local converter → quantizing (quantize.sh fetches its source)"
     ./quantize.sh "$R"          # self-sufficient: downloads the BF16 source if missing, then quantizes
   else
+    # myllmbox models WITHOUT a quantize block are published quants — hf.co/myllmbox/* is a real
+    # namespace now; download them like any other model.
     echo "· model not downloaded yet → fetching $(strip "$MODEL")"
     ./download.sh "$(strip "$MODEL")"
   fi
