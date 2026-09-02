@@ -18,6 +18,8 @@
 server:
   image: myllmbox/qwen38-flash-next-vllm:v1     # pinned public tag, pushed 2026-09-02
                                                 # digest: sha256:92ccd7de6d80b9597844d7a5bffb9ded4067dd323129e18bc24192c00dac09ad
+  cpuset: "5-9,15-19"                           # the 10 Cortex-X925 3.9GHz cores (0-4,10-14 = A725
+                                                # 2.8GHz) — pin A/B'd +2-3% at every concurrency
   entrypoint: vllm                              # plain `vllm serve` — the checkpoint is final
   model: /models/myllmbox/Qwen3.8-Flash-Next-hibrid46   # == the HF repo id (./download.sh lands here).
                                                 # PENDING MOVE (blocked on the running upload): bytes
@@ -35,7 +37,7 @@ server:
     FLASHINFER_CUDA_ARCH_LIST: "12.1a"
     FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
     VLLM_CACHE_ROOT: /cache/vllm-cache
-    OMP_NUM_THREADS: "18"
+    OMP_NUM_THREADS: "8"                        # matched to the 10-core pin
     MBX_VOCAB_GEMV: "1"                         # championship-proven (+5.5% steps)
     VLLM_MARLIN_USE_ATOMIC_ADD: "1"             # Marlin small-N fast path (self-gating)
 
