@@ -31,6 +31,9 @@ resident in the offload worker), MBX_PLE_MMAP bank persistence (lab path), MBX_P
 --speculative-config '{"method":"mtp","num_speculative_tokens":3}'
 --enable-prefix-caching --async-scheduling=OFF` + env `VLLM_PLE_CPU_OFFLOAD=1`.
 - async OFF is load-bearing: async+MTP corrupted ~2 of 8 concurrent outputs (2026-09-01).
+  **AMENDED 2026-09-02:** disproved by a controlled A/B — async OFF measured 4/8 bad renders vs
+  2/8 with it on; the variance is the model's own under concurrent thinking-heavy prompts.
+  Shipping config now runs `async-scheduling: true` (+9–12% at c=4–5, neutral at c=8).
 - KV must stay bf16 (vendor QSA guard refuses fp8).
 - Prefix caching: watch item — peer recipe reports a mamba/GDN split-alignment bug; under
   investigation.

@@ -9,8 +9,8 @@
 # Lineage: hibrid45 champion (renamed ../qwen38-flash-next-off, the offload/bank-era stack) ->
 # hibrid46 test lane (../qwen38-flash-next-test, the lab) -> THIS. Scoreboard (single Spark, K=3,
 # thinking-off code band): c=1 44 / c=2 72 / c=4 103 / c=8 148-158 peak 167.5 aggregate tok/s.
-# async-scheduling stays FALSE: async+MTP on this backend corrupted ~2 of 8 concurrent outputs
-# (2026-09-01 gauntlets). KV stays bf16 (vendor QSA guard refuses fp8).
+# async-scheduling ON (corruption suspicion disproved by A/B 2026-09-02 — bad-render rate is the
+# model's own variance, async-off measured WORSE: 4/8 vs 2/8). KV stays bf16 (vendor QSA guard).
 #
 # Fresh box:  ./download.sh myllmbox/Qwen3.8-Flash-Next-hibrid46   (then point model: below at it)
 # Our head box already holds the same bytes at models/export/ (the upload source).
@@ -46,7 +46,10 @@ server:
     gpu-memory-utilization: 0.70
     kv-cache-memory: "18000000000"              # 18 GB = 579,550 KV tokens (measured)
     max-model-len: 262144
-    async-scheduling: false                     # SHIPPING CONFIG — see header; lab rung only
+    async-scheduling: true                      # +9-12% steps at c=4-5, ~neutral at c=8. The 2026-09-01
+                                                # "corruption" suspicion was DISPROVED by a controlled
+                                                # A/B (async off produced 4/8 bad renders vs 2/8 with it
+                                                # on — that's the model's own thinking-band variance).
     max-num-seqs: 8
     max-num-batched-tokens: 8192                # also the image encoder budget: realistic multi-
                                                 # screenshot requests ~2k tokens, one max-res ~4.1k;
