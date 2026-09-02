@@ -1,82 +1,62 @@
-# Qwen3.8-Flash-Next HIBRID45 — ============ CHAMPION (validated 2026-08-30) ============
-# Inferact NVFP4 experts + OUR NVFP4 dense EXCEPT attention (QSA q/k/v/o untouched bf16), solo box.
+# Qwen3.8-Flash-Next — THE PUBLISHED STACK (2026-09-01): hibrid46 + in-checkpoint int3 PLE.
+# This recipe serves EXACTLY what the world gets:
+#   weights = hf.co/myllmbox/Qwen3.8-Flash-Next-hibrid46  (91G: 4.6-bit hibrid, PLE table shipped
+#             pre-quantized int3 as ordinary checkpoint tensors, declared in config.json)
+#   image   = docker.io/myllmbox/qwen38-flash-next-vllm:v1  (vendor base + the ple_layer patch;
+#             reproducible from builds/qwen38-flash-next/ — ledger + digest in vllm-v1.md there)
+# Self-describing checkpoint: no conversion, no bank, no quant pass, no MBX_PLE env — first boot
+# loads the table from the shards (resident, ~19.2G in the offload worker) and serves in ~15 min.
+# Lineage: hibrid45 champion (renamed ../qwen38-flash-next-off, the offload/bank-era stack) ->
+# hibrid46 test lane (../qwen38-flash-next-test, the lab) -> THIS. Scoreboard (single Spark, K=3,
+# thinking-off code band): c=1 44 / c=2 72 / c=4 103 / c=8 148-158 peak 167.5 aggregate tok/s.
+# async-scheduling stays FALSE: async+MTP on this backend corrupted ~2 of 8 concurrent outputs
+# (2026-09-01 gauntlets). KV stays bf16 (vendor QSA guard refuses fp8).
 #
-# THE PRECISION MAP (why this split — measured, not guessed):
-#   experts                       nvfp4 (Inferact)  the bulk; tolerant
-#   GDN in/out + shared expert    nvfp4 (OURS)      0.97+0.11 GiB/step — multiplicative, tolerant
-#   QSA q/k/v/o                   bf16 SACRED       comparators: q.k dot products RANK tokens; 4-bit
-#                                                   noise flips rankings (hibrid4 lesson) and even
-#                                                   fp8 cost acceptance — bf16 BEAT the fp8 champion
-#                                                   on the paired prose A/B (2.55-3.04 vs 1.81-2.30)
-#   lm_head/embeds/MTP/PLE/norms  bf16              quality-critical set (Alibaba's own exclusions)
-#
-# SCOREBOARD (single Spark, K=3):
-#   hibrid45 (THIS):   13.2-13.6 steps/s, code 50-52 (peak 51.6+), prose accept 2.5-3.0 (beats fp8's
-#                      1.8-2.3 same-prompt); pasture-passed, "near identical to pre-compression".
-#   hibrid4 (retired): all-nvfp4 dense = 13.8 steps, PEAK 53.5 / 70.5 c=2 aggregate — intermittent
-#                      IQ drop (pasture defects, prose floor 2.08). Speed record only; do not serve.
-#   fp8 hibrid (old):  12.8 steps, code 46-50, peak 50.0 — superseded (this folder's git history).
-# Experiment trail: experiments/qwen38-flash-next-solo-test (uncommitted lane).
-#
-# OUT OF THE BOX — ONE command does everything (image build -> source download if absent ->
-# checkpoint conversion -> serve; later boots fast-skip all of it):
-#   ./run.sh qwen38-flash-next
-# Manual pre-steps still work if you want them staged: ./download.sh Inferact/Qwen3.8-Flash-Next-NVFP4
-# (~183G source), ./recipes/qwen38-flash-next/make-hibrid45.sh (CPU-only conversion,
-# safe alongside a running serve).
-# The image also carries MBX_INDEX_STRICT (default on): hardlinked hibrid checkpoints leave stale
-# originals in the old shards and vLLM iterates FILES, not the index — packed 4-bit weights
-# shape-assert on the stale bf16 copies without it (the fp8 era survived only by shard sort order).
+# Fresh box:  ./download.sh myllmbox/Qwen3.8-Flash-Next-hibrid46   (then point model: below at it)
+# Our head box already holds the same bytes at models/export/ (the upload source).
 
 server:
-  image: mbx-qwen38-flash-next      # built from THIS folder's Dockerfile
-  entrypoint: /opt/mbx/serve-entry.sh           # first-boot self-conversion, then exec vllm serve
-  model: /models/myllmbox/Qwen3.8-Flash-Next-hibrid45
-  cache: recipes/qwen38-flash-next/.data/cache   # shared: SAME PLE table bytes (hardlinked
-                                                # shards) -> same tag reuses the banked 95G table
+  image: myllmbox/qwen38-flash-next-vllm:v1     # pinned public tag, pushed 2026-09-02
+                                                # digest: sha256:92ccd7de6d80b9597844d7a5bffb9ded4067dd323129e18bc24192c00dac09ad
+  entrypoint: vllm                              # plain `vllm serve` — the checkpoint is final
+  model: /models/myllmbox/Qwen3.8-Flash-Next-hibrid46   # == the HF repo id (./download.sh lands here).
+                                                # PENDING MOVE (blocked on the running upload): bytes
+                                                # currently at models/export/...-hf; the full-fat local
+                                                # conversion at this path renames to ...-hibrid46-off
+                                                # first (the bf16-table reference lane's checkpoint).
+  cache: recipes/qwen38-flash-next/.data/cache
 
   env:
     HF_HUB_OFFLINE: "1"
     TRANSFORMERS_OFFLINE: "1"
     HF_HUB_DISABLE_XET: "1"
-    VLLM_PLE_CPU_OFFLOAD: "1"
-    MBX_PLE_MMAP: "1"                           # never disable (house rule)
-    MBX_PLE_MMAP_TAG: "inferact-nvfp4"          # table bytes identical to Inferact (hardlinks) — reuse bank
+    VLLM_PLE_CPU_OFFLOAD: "1"                   # the vendor's own offload switch — the only PLE knob
     TORCH_CUDA_ARCH_LIST: "12.1a"
     FLASHINFER_CUDA_ARCH_LIST: "12.1a"
     FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
     VLLM_CACHE_ROOT: /cache/vllm-cache
     OMP_NUM_THREADS: "18"
-    MBX_VOCAB_GEMV: "1"                         # championship-proven on the fp8 hibrid (+5.5% steps)
-    VLLM_MARLIN_USE_ATOMIC_ADD: "1"             # Marlin small-N fast path (its own warmup hint; also
-                                                # used in our DS-V4 MoE stack). Self-gating: only fires
-                                                # when n<2048 & k>=2048 & m*n small — i.e. the narrow
-                                                # shared-expert/fused fp4 GEMMs; big GEMMs untouched.
+    MBX_VOCAB_GEMV: "1"                         # championship-proven (+5.5% steps)
+    VLLM_MARLIN_USE_ATOMIC_ADD: "1"             # Marlin small-N fast path (self-gating)
 
   vllm:
     served-model-name: Qwen/Qwen3.8-Flash-Next
     tensor-parallel-size: 1
     distributed-executor-backend: mp            # REQUIRED — PLE worker spawn gap on uniproc
-    gpu-memory-utilization: 0.85
-    kv-cache-memory: "25000000000"              # 25 GB decimal = 23.3 GiB (~790k KV tokens, ~3x full-
-                                                # context concurrency). The full 25 GiB (26843545600)
-                                                # nearly OOMed the autotune peak (~240MB free, 5G swap)
-                                                # — this round number leaves ~1.5G boot headroom.
+    gpu-memory-utilization: 0.70
+    kv-cache-memory: "18000000000"              # 18 GB = 579,550 KV tokens (measured)
     max-model-len: 262144
-    async-scheduling: false                     # unfixed async+MTP n-gram bug (PR #53896)
+    async-scheduling: false                     # SHIPPING CONFIG — see header; lab rung only
     max-num-seqs: 8
-    max-num-batched-tokens: 16384
-    enable-prefix-caching: true
+    max-num-batched-tokens: 8192                # also the image encoder budget: realistic multi-
+                                                # screenshot requests ~2k tokens, one max-res ~4.1k;
+                                                # two untouched max-res (~8.2k) is the first wedge
+    enable-prefix-caching: true                 # WATCH ITEM: mamba/GDN prefix-cache alignment bug
+                                                # reported by peer recipe (Saren) — under investigation;
+                                                # flip false if cached-prefix outputs degrade
     enable-auto-tool-choice: true
     tool-call-parser: qwen3_xml
     reasoning-parser: qwen3
-    speculative-config: '{"method":"mtp","num_speculative_tokens":3}'   # K=3 (champion setting)
-
-# run.sh model pipeline: missing /models/myllmbox/* -> quantize.sh -> this recipe-local converter
-# (source downloaded first if absent).
-quantize:
-  source: /models/Inferact/Qwen3.8-Flash-Next-NVFP4
-  script: make-hibrid45.sh
-  out: /models/myllmbox/Qwen3.8-Flash-Next-hibrid45
+    speculative-config: '{"method":"mtp","num_speculative_tokens":3}'   # K=3 (K=4 = next A/B)
 
 dashboard: sparkdash

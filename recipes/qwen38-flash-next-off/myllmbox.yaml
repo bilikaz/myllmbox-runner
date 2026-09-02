@@ -1,0 +1,69 @@
+# Qwen3.8-Flash-Next hibrid46 + BF16 PLE OFFLOAD — ===== THE QUALITY-REFERENCE RUNG =====
+# ("-off" = the bank/offload-era stack.) SAME hibrid46 checkpoint as the published champion
+# (../qwen38-flash-next), but the 95.4G n-gram/PLE table stays FULL BF16, served via the
+# file-backed bank (MBX_PLE_MMAP). The ONLY variable vs the champion is table precision:
+#   champion = int3 table (in-checkpoint, resident ~19.2G)  |  THIS = bf16 table (mmap bank)
+# -> the clean paired A/B for the int3 quality question, and the fallback serve if int3 ever
+# shows a defect. Costs: the table cache-walks 95G (NVMe paging throttles c>=3 at ~200MB/s;
+# c=1/2 fine), KV can afford 25G since no resident table.
+# hibrid46 conversion touched only dense tiers (shared expert back to bf16; GDN nvfp4) — the
+# ngram table is untouched Inferact bytes, so the existing bank (tag inferact-nvfp4) is VALID.
+# History (hibrid45 champion era, hibrid4, fp8) lives in this folder's git log.
+#
+#   ./run.sh qwen38-flash-next-off
+# Source checkpoint: /models/myllmbox/Qwen3.8-Flash-Next-hibrid46-off — the full 172G LOCAL
+# conversion WITH the 128 bf16 ngram shards. NEVER downloaded: the published HF repo ships int3
+# heads and no bf16 table, so this lane always builds from the Inferact original (quantize: below).
+
+server:
+  image: mbx-qwen38-flash-next-off  # built from THIS folder's Dockerfile (bank-era patches).
+                                    # NOTE: rebuild before first boot (./build-and-copy.sh
+                                    # qwen38-flash-next-off) — the folder rename changed the image
+                                    # name, and the entrypoint now bakes the hibrid46 converter.
+  entrypoint: /opt/mbx/serve-entry.sh           # first-boot self-conversion, then exec vllm serve
+  model: /models/myllmbox/Qwen3.8-Flash-Next-hibrid46-off   # PENDING RENAME (post-upload): currently
+                                                # still at /models/myllmbox/Qwen3.8-Flash-Next-hibrid46
+  cache: recipes/qwen38-flash-next-off/.data/cache # bank keyed to TABLE bytes (Inferact hardlinks,
+                                                # identical across hibrids) -> existing 95G bank reused
+
+  env:
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    HF_HUB_DISABLE_XET: "1"
+    VLLM_PLE_CPU_OFFLOAD: "1"
+    MBX_PLE_MMAP: "1"                           # never disable (house rule)
+    MBX_PLE_MMAP_TAG: "inferact-nvfp4"          # table bytes identical to Inferact (hardlinks) — reuse bank
+    TORCH_CUDA_ARCH_LIST: "12.1a"
+    FLASHINFER_CUDA_ARCH_LIST: "12.1a"
+    FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
+    VLLM_CACHE_ROOT: /cache/vllm-cache
+    OMP_NUM_THREADS: "18"
+    MBX_VOCAB_GEMV: "1"                         # championship-proven on the fp8 hibrid (+5.5% steps)
+    VLLM_MARLIN_USE_ATOMIC_ADD: "1"             # Marlin small-N fast path (self-gating: only the
+                                                # narrow shared-expert/fused fp4 GEMMs)
+
+  vllm:
+    served-model-name: Qwen/Qwen3.8-Flash-Next
+    tensor-parallel-size: 1
+    distributed-executor-backend: mp            # REQUIRED — PLE worker spawn gap on uniproc
+    gpu-memory-utilization: 0.85
+    kv-cache-memory: "25000000000"              # 25 GB (~790k KV tokens) — affordable here: the bf16
+                                                # table lives in the mmap bank, not resident RAM
+    max-model-len: 262144
+    async-scheduling: false                     # async+MTP corrupted ~2/8 concurrent outputs (2026-09-01)
+    max-num-seqs: 8
+    max-num-batched-tokens: 16384
+    enable-prefix-caching: true                 # WATCH ITEM: peer-reported mamba/GDN split-alignment bug
+    enable-auto-tool-choice: true
+    tool-call-parser: qwen3_xml
+    reasoning-parser: qwen3
+    speculative-config: '{"method":"mtp","num_speculative_tokens":3}'   # K=3
+
+# run.sh model pipeline: missing /models/myllmbox/* -> quantize.sh -> this recipe-local converter
+# (source downloaded first if absent).
+quantize:
+  source: /models/Inferact/Qwen3.8-Flash-Next-NVFP4
+  script: make-hibrid46.sh
+  out: /models/myllmbox/Qwen3.8-Flash-Next-hibrid46-off
+
+dashboard: sparkdash

@@ -13,3 +13,8 @@ dashboards/*/.data/
 recipes/*/.data/
 experiments/
 bench/results/
+# solo kits are each their own git repo — nothing here is tracked by the main repo
+# (the kit contract is documented in builds/README.md)
+/solo/
+# internal pre-push checklist, never shipped
+builds/instructions.md

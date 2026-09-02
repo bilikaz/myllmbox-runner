@@ -4,7 +4,7 @@
 # /opt/mbx/make-hibrid46.py) — run.sh builds it before the model pipeline, so this works on a fresh box.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-IMG=mbx-qwen38-flash-next-test
+IMG=mbx-qwen38-flash-next
 docker image inspect "$IMG" >/dev/null 2>&1 \
   || { echo "image $IMG missing — build it first: ./build-and-copy.sh qwen38-flash-next (or just ./run.sh)"; exit 1; }
 mkdir -p models/myllmbox

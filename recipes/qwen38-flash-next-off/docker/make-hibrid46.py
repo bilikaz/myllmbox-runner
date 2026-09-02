@@ -36,20 +36,20 @@ from safetensors import safe_open
 from safetensors.torch import save_file
 
 SRC = "/models/Inferact/Qwen3.8-Flash-Next-NVFP4"
-DST = "/models/myllmbox/Qwen3.8-Flash-Next-hibrid45"
+DST = "/models/myllmbox/Qwen3.8-Flash-Next-hibrid46-off"
 GROUP = 16
 FP4_MAX = 6.0
 FP8_MAX = 448.0
 FP4_VALUES = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
 ALGO = "W4A16_NVFP4"
-SHARD_NAME = "model-hibrid45-nvfp4.safetensors"
+SHARD_NAME = "model-hibrid46-nvfp4.safetensors"
 
+# hibrid46: shared expert BACK to bf16 (buys ~0.4% steps at unmeasured risk — and Alibaba's own
+# FP8 release excludes it too). GDN stays nvfp4 (~3.5% steps, A/B-validated).
 PATTERNS = [
     r"^model\.language_model\.layers\.\d+\.linear_attn\.(in_proj_qkv|in_proj_z|out_proj)$",
-    r"^model\.language_model\.layers\.\d+\.mlp\.shared_expert\.(gate_proj|up_proj|down_proj)$",
 ]
 FUSED_GROUPS = {
-    "mlp.shared_expert.gate_up_proj": ("mlp.shared_expert.gate_proj", "mlp.shared_expert.up_proj"),
     "linear_attn.in_proj_qkvz": ("linear_attn.in_proj_qkv", "linear_attn.in_proj_z"),
 }
 
@@ -91,7 +91,7 @@ def _complete() -> bool:
 
 def main() -> None:
     if _complete():
-        print(f"hibrid45 checkpoint already complete: {DST} — skipping conversion")
+        print(f"hibrid46 checkpoint already complete: {DST} — skipping conversion")
         return
     idx_path = f"{SRC}/model.safetensors.index.json"
     if not os.path.exists(idx_path):
