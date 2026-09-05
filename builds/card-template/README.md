@@ -12,7 +12,7 @@ from the LADDER array — set per-rung values, pending:true renders hollow), har
 2. Preview: publish as an artifact or open locally.
 3. Export PNG: `builds/card-template/export.sh <card.html> <spark-photo.png> <out.png>` — embeds the photo,
    makes the borderless export variant (body padding 0, fixed 1500px card, radius 0), renders with a local
-   headless Chromium (Playwright's cache) or Windows Chrome, crops to content bottom + 44px (PIL).
+   headless Chromium (Playwright's cache) or Windows Chrome, crops exactly at the card's bottom edge (PIL; no page ground below).
    Cards made so far: `builds/qwen38-flash-next/cluster/card-qwen38-cluster.html` (2× Spark, 2026-09-05).
 
 House rules that shaped it (builds/instructions.md applies): numbers measured with conditions,

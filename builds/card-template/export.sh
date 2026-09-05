@@ -29,7 +29,9 @@ fi
 python3 - "$S/shot.png" "$OUT" <<'PY'
 import sys
 from PIL import Image
+# The export variant has no page padding and a full-width card, so the page background (bottom-right pixel)
+# starts exactly where the card ends. Crop THERE — no extra rows, or the ground shows as a stripe under the card.
 im = Image.open(sys.argv[1]).convert("RGB"); w, h = im.size; bg = im.getpixel((w - 1, h - 1))
-last = max(y for y in range(h) if any(im.getpixel((x, y)) != bg for x in range(0, w, 8)))
-im.crop((0, 0, w, min(h, last + 44))).save(sys.argv[2]); print("saved", sys.argv[2], im.size, "->", (w, min(h, last + 44)))
+last = max(y for y in range(h) if any(im.getpixel((x, y)) != bg for x in range(0, w, 4)))
+im.crop((0, 0, w, last + 1)).save(sys.argv[2]); print("saved", sys.argv[2], im.size, "->", (w, last + 1))
 PY
