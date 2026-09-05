@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import shlex
+import time
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,12 @@ def run_args(cfg: dict[str, Any], node_rank: int = 0, nnodes: int = 1, master_ad
     args = ["docker", "run", "-d", "--name", CONTAINER, "--gpus", str(v["devices"]), "--ipc=host", "--cap-add", "SYS_PTRACE"]
     # multi-node NCCL needs host networking (nodes talk over the ConnectX link); single-node maps a port.
     args += ["--network", "host"] if multi else ["-p", f"127.0.0.1:{v['port']}:{v['port']}"]
+    if multi:
+        # RDMA for real: NCCL_IB_HCA (below) names the ConnectX verbs device, but a plain container can't
+        # OPEN it — no /dev/infiniband, memlock capped at 8 MB, no IPC_LOCK — so NCCL silently fell back to
+        # TCP sockets over the same link (found 2026-09-04: iface tx 82 MB/s, RDMA port counters flat at 0,
+        # ~2x slower TP step than the community launchers, which all pass exactly these three flags).
+        args += ["--device", "/dev/infiniband", "--cap-add", "IPC_LOCK", "--ulimit", "memlock=-1:-1"]
     # optional CPU pinning (server.cpuset, e.g. "5-9,15-19" = GB10 performance cores — MiaAI's dual-Spark
     # recipe pins these; keeps the scheduler/tokenizer off the efficiency cores).
     if v.get("cpuset"):
@@ -160,12 +167,51 @@ def run_args(cfg: dict[str, Any], node_rank: int = 0, nnodes: int = 1, master_ad
     return args
 
 
+def _node_sh(cfg: dict[str, Any], rank: int, script: str) -> str:
+    """Run a bash snippet on node <rank> (0 = local, else ssh); return stdout ('' on failure)."""
+    cmd = ["bash", "-c", script] if rank == 0 else [*_ssh(cfg, rank), shlex.join(["bash", "-c", script])]
+    out = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    return out.stdout.strip()
+
+
+def _prelaunch_memory(cfg: dict[str, Any]) -> None:
+    """Unified-memory launch hygiene, same tricks the solo kits use, no root anywhere:
+    1. wait until every node has >= server.min_avail_gb GiB AVAILABLE (a just-killed container's GPU pages come back
+       over ~30-60 s; launching earlier = phantom CUDA OOM). 0 = skip the wait.
+    2. evict the model's shard files from the page cache (`dd iflag=nocache count=0` = POSIX_FADV_DONTNEED) on every
+       node — the GPU driver wants FREE pages; a page cache full of shards during load has livelocked the loader."""
+    s = cfg["server"]
+    ns = nodes(cfg) or ["local"]
+    need = int(s.get("min_avail_gb") or 0)
+    if need > 0:
+        waited = 0
+        while True:
+            avail = [int(_node_sh(cfg, r, "free -g | awk '/^Mem:/{print $7}'") or 0) for r in range(len(ns))]
+            if all(a >= need for a in avail):
+                log.info("memory: %s GiB available on nodes — ok (need %d)", "/".join(map(str, avail)), need)
+                break
+            if waited >= 120:
+                raise SystemExit(f"memory: only {'/'.join(map(str, avail))} GiB available (need {need} on every node) after 120 s — "
+                                 "another serve still running? (docker ps on each box)")
+            if waited == 0:
+                log.info("memory: %s GiB available, need %d — waiting for unified memory to come back…", "/".join(map(str, avail)), need)
+            time.sleep(5); waited += 5
+    model = str(s.get("model") or "")
+    if model.startswith("/models/") and s.get("models_dir"):
+        host_dir = str(Path(s["models_dir"]).expanduser().resolve() / model[len("/models/"):])
+        script = (f'for f in "{host_dir}"/*.safetensors; do [ -f "$f" ] && dd if="$f" iflag=nocache count=0 status=none 2>/dev/null; done; '
+                  "awk '/^MemFree/{printf \"%d\", $2/1048576}' /proc/meminfo")
+        free_after = [_node_sh(cfg, r, script) or "?" for r in range(len(ns))]
+        log.info("memory: evicted %s from the page cache on every node (no root) — MemFree now %s GiB", host_dir, "/".join(free_after))
+
+
 def start(cfg: dict[str, Any]) -> None:
     s = cfg["server"]
     if not s.get("command") and not s["model"]:
         raise SystemExit("server.model is required (or set server.command for a generic server)")
     ns = nodes(cfg)
     stop(cfg)  # clear stale containers on every node first
+    _prelaunch_memory(cfg)
     if len(ns) > 1:
         nn, master = len(ns), ns[0]
         log.info("cluster: %d nodes (TP=%d), master=%s:%s", nn, nn, master, (cfg.get("cluster") or {}).get("master_port"))

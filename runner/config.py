@@ -37,6 +37,12 @@ DEFAULTS: dict[str, Any] = {
         "env": {},
         "runtime": "",
         "devices": "all",
+        # Unified-memory launch hygiene (DGX Spark): before starting containers the runner (a) waits until every
+        # node reports at least this much AVAILABLE memory (GiB) — a container torn down seconds ago still holds
+        # its GPU pages for ~30-60 s and launching into that gives a phantom "CUDA out of memory"; 0 = don't wait —
+        # and (b) evicts the model's shard files from the page cache with `dd iflag=nocache` (no root: the driver
+        # wants FREE pages, not reclaimable cache; a 60-70 GB cache during load has livelocked the loader).
+        "min_avail_gb": 0,
         # override the image's default ENTRYPOINT (e.g. a dspark bootstrap) so the runner drives the launch
         # itself — "vllm" → `vllm serve <model> <flags>`. "" keeps the image's own entrypoint.
         "entrypoint": "",

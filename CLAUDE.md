@@ -20,6 +20,10 @@ required fields beyond `vllm.model`, no sanitising. Whatever you put in flows st
   proxy/tunnel front (sglang serves `/v1/*` + `/health`). See `recipes/qwen38-flash-next-sglang/`.
 - **`vllm.mounts`** — extra `host:container` binds, raw.
 - **`server.cpuset`** — optional `--cpuset-cpus` pin (e.g. `"5-9,15-19"` = GB10 performance cores).
+- **`server.min_avail_gb`** — unified-memory launch gate: before starting containers the runner waits until every
+  node has this much memory AVAILABLE (a just-killed container's GPU pages take ~30-60 s to come back; launching
+  earlier = phantom CUDA OOM), then evicts the model's shards from the page cache with `dd iflag=nocache` (no root —
+  the GPU driver wants FREE pages; a 60-70 GB shard cache during load has livelocked the loader). 0 = no wait.
 - **`cluster`** — presence turns on multi-node; absence = single node. You define the nodes.
 - **`dashboard: <name>`** — OPTIONAL web UI → `dashboards/<name>/` (its own `up.sh`/`down.sh` + a `dashboard.yaml`
   giving `port`). The proxy sends `/v1/*` to the model and **every other path** to `127.0.0.1:port`;
