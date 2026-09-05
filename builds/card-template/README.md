@@ -8,7 +8,7 @@ from the LADDER array — set per-rung values, pending:true renders hollow), har
 ## To make a new card
 1. Copy `card-template.html`, edit: title, kicker, chips, dial values/labels, LADDER data,
    hardware line, links. Photo: replace `__SPARK_PNG__` with a base64 data URI
-   (`python3 -c "import base64; print(base64.b64encode(open('photo.png','rb').read()).decode())"`).
+   — the photo lives here as `spark.png` (the rendered DGX Spark box, used on every card); export.sh embeds it.
 2. Preview: publish as an artifact or open locally.
 3. Export PNG: `builds/card-template/export.sh <card.html> <spark-photo.png> <out.png>` — embeds the photo,
    makes the borderless export variant (body padding 0, fixed 1500px card, radius 0), renders with a local
