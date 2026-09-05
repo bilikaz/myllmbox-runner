@@ -10,7 +10,7 @@
 #   steps/s (engine), c=1..64 ladder via bench/test.py, and bench/logprob.py (bf16 table vs int3 vs NVFP4).
 #
 # FIRST: build the checkpoint (one-time, ~30-60 min, runs on a serving box — user runs it):
-#   docker run --rm -v $PWD/models:/models -v $PWD/recipes/qwen38-flash-next-cluster-test/docker/make-ple-nvfp4.py:/x.py:ro \
+#   docker run --rm --user $(id -u):$(id -g) -v $PWD/models:/models -v $PWD/recipes/qwen38-flash-next-cluster-test/docker/make-ple-nvfp4.py:/x.py:ro \
 #     --entrypoint python3 myllmbox/qwen38-flash-next-vllm:v1 /x.py \
 #     --int3 /models/myllmbox/Qwen3.8-Flash-Next-hibrid46 --bf16 /models/myllmbox/Qwen3.8-Flash-Next-hibrid46-off \
 #     --dst /models/myllmbox/Qwen3.8-Flash-Next-hibrid46-ple4

@@ -19,7 +19,7 @@ scale so codes are nearest-to-effective, not nearest-to-ideal. ~4.5 bits/value â
 Two streaming passes over the bf16 source (global amax, then quantize), 250k-row chunks, ~200 MB working set â€”
 runs on a serving box. Resumable per output shard (a .ok marker per file).
 
-  docker run --rm -v /home/valdas/spark-vllm-docker/models:/models -v $PWD/docker/make-ple-nvfp4.py:/x.py:ro \\
+  docker run --rm --user $(id -u):$(id -g) -v /home/valdas/spark-vllm-docker/models:/models -v $PWD/docker/make-ple-nvfp4.py:/x.py:ro \\
       --entrypoint python3 myllmbox/qwen38-flash-next-vllm:v1 /x.py \\
       --int3 /models/myllmbox/Qwen3.8-Flash-Next-hibrid46 --bf16 /models/myllmbox/Qwen3.8-Flash-Next-hibrid46-off \\
       --dst /models/myllmbox/Qwen3.8-Flash-Next-hibrid46-ple4
