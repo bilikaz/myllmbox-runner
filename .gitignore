@@ -18,3 +18,7 @@ bench/results/
 /solo/
 # internal pre-push checklist, never shipped
 builds/instructions.md
+
+# lab lanes: recipes/<name>-test/ run via run.sh like any recipe but stay LOCAL until they graduate
+# (recipes/ is for real serves; the lab history lives in experiments/)
+recipes/*-test/
