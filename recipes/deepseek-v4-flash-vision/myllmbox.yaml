@@ -1,0 +1,97 @@
+# DeepSeek-V4-Flash-Vision-Exp — the vision DS-V4 (305B MoE, FP8 e4m3/ue8m0 dense + fp4 experts, native
+# image input, DSpark k=5 + adaptive verification) on 2× DGX Spark (GB10/SM121), TP=2 over ConnectX.
+# Image = mbx-deepseek-v4-flash-vision: the official per-model vLLM image (pinned by digest) + our five
+# anchor patches — see Dockerfile for provenance (PR #54631/#54815/#52724 ports, SM121 adaptive
+# verification, FlashInfer dual-cache TOPK=512 prefill). Same fabric/front as ../deepseek-v4-flash.
+#
+# Serve profile = the r0b0tlab 2×GB10 production profile (k=5 adaptive, fp8 KV, FULL_DECODE_ONLY graphs,
+# 8192 batched tokens, long-prefill threshold) with our house rules on top: thinking ON, context capped
+# at 300k (1M-monster policy; robot validated 512k @0.875 and 1M @0.875 on this exact image+model —
+# raising is a config decision, not a build one), X925-core pin + OMP threads (the qwen3.8 tweak).
+#
+# FIRST BOOT: the patched FlashInfer prefill kernel + the SM120 sparse-MLA decode JIT (~2–3 min) and
+# vLLM/TileLang/Triton caches land in server.cache (/cache) on BOTH boxes → later boots skip them.
+# Expect ~15 min to healthy on a cold box (157G load + warmup + cudagraph capture).
+
+server:
+  image: mbx-deepseek-v4-flash-vision              # built by run.sh from this folder's Dockerfile, shipped to box2
+  model: /models/deepseek-ai/DeepSeek-V4-Flash-Vision-Exp   # 48 shards / 157G, offline; rsynced to box2 by run.sh
+  cpuset: "5-9,15-19"                              # GB10's 10 Cortex-X925 3.9GHz cores (0-4,10-14 = A725 2.8GHz);
+                                                   # +2-3% at every concurrency on qwen3.8 — A/B item here
+  cache: recipes/deepseek-v4-flash-vision/.data/cache   # → /cache on both boxes: FlashInfer JIT, Triton, TileLang, vLLM
+  min_avail_gb: 100                             # wait for unified memory after a teardown (phantom OOM otherwise)
+
+  env:
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    HF_HUB_DISABLE_XET: "1"
+    OMP_NUM_THREADS: "8"                           # matched to the 10-core pin
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+    VLLM_USE_AOT_COMPILE: "0"
+    VLLM_USE_BREAKABLE_CUDAGRAPH: "0"              # robot: required with FULL_DECODE_ONLY + adaptive verification
+    VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "1800"     # first-boot JIT/warmup steps exceed the default watchdog
+    VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "0"  # don't pre-reserve cudagraph memory out of the KV pool
+    FLASHINFER_DISABLE_VERSION_CHECK: "1"
+    VLLM_FLASHINFER_AUTOTUNE_SKIP_OPS: "trtllm_fp4_block_scale_moe,flashinfer::trtllm_fp4_block_scale_moe"
+                                                   # autotune stays ON; only the fp4-block-scale MoE ops are skipped
+    PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"   # robot's validated stack keeps it (our jasl-lane livelock
+                                                   # was a Marlin-dequant artefact, not this image's MoE path)
+    # persistent JIT/compile caches under the /cache mount (TileLang's default is INSIDE the container →
+    # the mHC kernel storm would recompile every boot; see r0b0tlab lesson)
+    FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
+    TRITON_CACHE_DIR: /cache/triton
+    TILELANG_CACHE_DIR: /cache/tilelang
+    TILELANG_CLEANUP_TEMP_FILES: "1"
+    VLLM_CACHE_ROOT: /cache/vllm-cache
+    # RoCE NCCL over ConnectX (the launcher sets IFNAME/HCA/IB_DISABLE per node; these pin RoCE v2):
+    NCCL_IB_GID_INDEX: "3"
+    NCCL_IB_ROCE_VERSION_NUM: "2"
+    NCCL_IB_ADDR_FAMILY: "AF_INET"
+    NCCL_CROSS_NIC: "1"
+    NCCL_IGNORE_CPU_AFFINITY: "1"
+    NCCL_CUMEM_ENABLE: "0"
+    NCCL_NVLS_ENABLE: "0"
+
+  vllm:
+    served-model-name: deepseek-ai/DeepSeek-V4-Flash-Vision-Exp
+    trust-remote-code: true
+    pipeline-parallel-size: 1
+    distributed-executor-backend: mp             # dual-node = mp (no Ray); TP set by the launcher
+    gpu-memory-utilization: 0.85                 # robot runs 0.875 @512k; 300k needs less — headroom for the
+                                                 # vision encoder + first-boot JIT on UMA
+    kv-cache-memory: "20000000000"               # 20 GB (18.6 GiB) ≈ vLLM's own "fit 0.85" figure (18.52 GiB,
+                                                 # boot-2 log): with cudagraph profiling off the pool auto-sized
+                                                 # to 22 GiB and both boxes sat at 0 G available. ~760k tokens
+    kv-cache-dtype: fp8                          # FlashInfer DSV4 sparse-MLA path (auto backend on SM121);
+                                                 # fp8_ds_mla is the FlashMLA layout — not this backend
+    block-size: 256
+    max-model-len: 400000                        # 1M-context model (config: 1,048,576); 400k = ~1.9 full requests
+                                                 # in the 20 GB pool (robot validated 512k/1M @0.875)
+    max-num-seqs: 8
+    max-num-batched-tokens: 8192                 # 16384 halves KV at long context (robot); one image = ≤387
+                                                 # tokens, so 8192 is far above the encoder-budget wedge
+    long-prefill-token-threshold: 1024           # keep a huge cold prefill from starving decode
+    limit-mm-per-prompt: '{"image":8}'           # clean 400 over a wedged engine
+    enable-prefix-caching: true
+    enable-chunked-prefill: true
+    tokenizer-mode: deepseek_v4
+    tool-call-parser: deepseek_v4
+    enable-auto-tool-choice: true
+    reasoning-parser: deepseek_v4
+    reasoning-config: '{"reasoning_parser":"deepseek_v4","reasoning_start_str":"<think>","reasoning_end_str":"</think>"}'
+    # DSpark self-draft: k MUST divide dspark_block_size=5 (patch 01 makes n_predict=5; k=6 is illegal here).
+    # adaptive verification = patches 03+04 (target verifies only what the confidence head asks for).
+    speculative-config: '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic","enable_adaptive_verification":true}'
+    # no torch.compile (the model doesn't support it); FULL decode-only graphs sized to max_num_seqs*(k+1)=48
+    compilation-config: '{"mode":0,"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4,8,16,32,48]}'
+    default-chat-template-kwargs: '{"thinking":true}'    # house default: thinking ON (clients may send false)
+    generation-config: vllm
+    # model-card recommendation for Vision-Exp: temperature 1.0 / top_p 0.95 (the checkpoint ships 1.0/1.0).
+    # NO repetition/frequency/presence penalty — it corrupts JSON/code/tool-calls.
+    override-generation-config: '{"temperature":1.0,"top_p":0.95}'
+
+cluster:                                         # TP=2 across both Sparks over the ConnectX link
+  boxes: [box1, box2]                            # names → cluster.yaml (host/interconnect/iface/ib_hca/ssh_user)
+  master_port: 25000
+
+dashboard: sparkdash

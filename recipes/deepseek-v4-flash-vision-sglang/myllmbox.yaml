@@ -1,0 +1,66 @@
+# DeepSeek-V4-Flash-Vision-Exp — SGLANG lane (A/B partner of ../deepseek-v4-flash-vision, the vLLM lane).
+# Source: SGLang cookbook "DeepSeek-V4 → Flash Vision (305B·Exp) → DGX Spark → FP4 → Balanced → Multi-Nodes"
+# (published 2026-09-03, tweet: "Both run on the b12x kernel library"). Their preview image is DGX-Spark-only
+# (branch b12x-vision: SM12x b12x MoE kernels, compressed-MLA attention, Flash Vision model). Reference image,
+# not our build — pinned tag; digest below. Prefer the vLLM lane once the A/B is in.
+#
+# Their env + flags are carried VERBATIM (labelled), our runner supplies the cluster plumbing (--dist-init-addr
+# /--nnodes/--node-rank/--tp, SGLANG_HOST_IP + NCCL pins to the ConnectX link) and the proxy/tunnel front.
+# Deviations from the cookbook cell: context 300000 (house 1M-monster cap; theirs 327680), served-model-name
+# set. max-running-requests stays at THEIR 32 (their note: pins DSpark concurrency; default would be 48).
+#
+# FIRST BOOT: b12x/FlashInfer JIT into /cache (FLASHINFER_WORKSPACE_BASE, TRITON_CACHE_DIR). Same 157G weights
+# as the vLLM lane (already on both boxes after that lane's first run).
+
+server:
+  image: lmsysorg/sglang:dev-v4f-2dgx-v2         # index digest sha256:67873eb93b994736ab534111f79b5aa93d2575b973ebf9d276c40d548ff9afec
+                                                 # arm64 · built 2026-09-02 · sglang commit 452239a74f5b · FlashInfer 0.6.18 · CUDA 13.0.3
+  model: /models/deepseek-ai/DeepSeek-V4-Flash-Vision-Exp
+  cpuset: "5-9,15-19"                            # same X925 pin as the vLLM lane (keep the A/B fair)
+  cache: recipes/deepseek-v4-flash-vision-sglang/.data/cache   # → /cache on both boxes
+
+  env:
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    HF_HUB_DISABLE_XET: "1"
+    OMP_NUM_THREADS: "8"
+    # --- cookbook cell env, verbatim ---
+    SGLANG_SM120_FLASHMLA_BACKEND: b12x
+    B12X_MLA_SM120_DSV4_H16_NATIVE: "1"
+    SGLANG_OPT_FUSE_MHC_POST_PRE: "1"
+    SGLANG_OPT_FP8_WO_A_GEMM: "1"
+    SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK: "1"
+    SGLANG_B12X_MAX_TOKENS: "8192"
+    PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
+    # --- persistent JIT caches (ours) ---
+    FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
+    TRITON_CACHE_DIR: /cache/triton
+    TILELANG_CACHE_DIR: /cache/tilelang
+    # --- RoCE NCCL over ConnectX (runner sets IFNAME/HCA/IB_DISABLE per node) ---
+    NCCL_IB_GID_INDEX: "3"
+    NCCL_IB_ROCE_VERSION_NUM: "2"
+    NCCL_IB_ADDR_FAMILY: "AF_INET"
+    NCCL_CROSS_NIC: "1"
+    NCCL_IGNORE_CPU_AFFINITY: "1"
+    NCCL_CUMEM_ENABLE: "0"
+    NCCL_NVLS_ENABLE: "0"
+
+  sglang:                                        # non-empty → runner launches sglang.launch_server (tp/nnodes/rank/dist-init-addr added)
+    served-model-name: deepseek-ai/DeepSeek-V4-Flash-Vision-Exp
+    trust-remote-code: true
+    moe-runner-backend: b12x                     # THE news: first-party b12x MoE runner on SM12x
+    speculative-algorithm: DSPARK
+    chunked-prefill-size: 8192
+    context-length: 300000                       # cookbook: 327680
+    mem-fraction-static: 0.80
+    swa-full-tokens-ratio: 0.2
+    cuda-graph-max-bs-decode: 32
+    max-running-requests: 32
+    reasoning-parser: deepseek-v4                # verify names against `sglang serve --help` in the image on first boot
+    tool-call-parser: deepseekv4
+
+cluster:
+  boxes: [box1, box2]
+  master_port: 25000                             # → --dist-init-addr <box1 interconnect>:25000
+
+dashboard: sparkdash
