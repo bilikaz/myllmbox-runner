@@ -10,11 +10,10 @@ from the LADDER array — set per-rung values, pending:true renders hollow), har
    hardware line, links. Photo: replace `__SPARK_PNG__` with a base64 data URI
    (`python3 -c "import base64; print(base64.b64encode(open('photo.png','rb').read()).decode())"`).
 2. Preview: publish as an artifact or open locally.
-3. Export PNG (WSL, borderless): make the export variant (body padding 0, card width fixed,
-   radius 0 — see git history of this file for the two sed replacements), render with Windows
-   Chrome headless:
-   `chrome.exe --headless --screenshot=out.png --window-size=1500,1400 --virtual-time-budget=8000 file.html`
-   then crop to content bottom + ~44px padding (PIL scan for last non-background row).
+3. Export PNG: `builds/card-template/export.sh <card.html> <spark-photo.png> <out.png>` — embeds the photo,
+   makes the borderless export variant (body padding 0, fixed 1500px card, radius 0), renders with a local
+   headless Chromium (Playwright's cache) or Windows Chrome, crops to content bottom + 44px (PIL).
+   Cards made so far: `builds/qwen38-flash-next/cluster/card-qwen38-cluster.html` (2× Spark, 2026-09-05).
 
 House rules that shaped it (builds/instructions.md applies): numbers measured with conditions,
 one green number per card, no internal names, chart points only from reproducible configs,
