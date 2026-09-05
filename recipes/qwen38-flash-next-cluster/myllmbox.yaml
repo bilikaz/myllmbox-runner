@@ -1,0 +1,82 @@
+# Qwen3.8-Flash-Next — THE PUBLISHED STACK, TP=2 ACROSS BOTH SPARKS over RDMA (2026-09-05).
+# Same bytes as ../qwen38-flash-next (hibrid46 checkpoint, in-shard int3 PLE table, v1 image) — the ONLY
+# differences are the cluster block, the multi-node PLE-offload gate, and the NCCL RoCE pins.
+#
+# WHY NOW: every 2-Spark number in this repo before 2026-09-04 was measured with NCCL on TCP sockets (the
+# container never had /dev/infiniband — see cluster-nccl memory). The runner fix put the vision serve on real
+# RDMA: step time 118 → 71 ms, c=1 25-28 → 46-49 tok/s, same acceptance. The 2026-08-29 cluster-vllm
+# experiment (NVFP4 + bf16 table, TCP) proved the multi-node PLE offload path boots; this lane re-runs that
+# idea on the champion checkpoint with RDMA. TP=2 halves each node's per-step weight traffic — the dense
+# GEMV floor no solo config can touch — so the target is STEP RATE: solo = 12.9 steps/s (44 tok/s c=1, K=3).
+# Roofline said ~45 steps/s possible; anything ≥ 2× solo steps = the "90 tok/s" question answered.
+#
+# PREREQUISITES: BOTH boxes free (this takes the cluster — the vision serve must come down first, user's call).
+# Weights: box1 has /models/myllmbox/Qwen3.8-Flash-Next-hibrid46 (95G); run.sh rsyncs it to box2 (one-time)
+# and builds+ships mbx-qwen38-flash-next-cluster. Fresh cache dir (TP=2 compile shapes; hibrid46 needs no bank).
+#
+#   ./run.sh qwen38-flash-next-cluster
+
+server:
+  image: mbx-qwen38-flash-next-cluster            # v1 release image + multi-node PLE offload patch (Dockerfile)
+  cpuset: "5-9,15-19"                             # X925 cores, as the solo champion (A/B'd +2-3%)
+  entrypoint: vllm                                # plain `vllm serve` — the checkpoint is final
+  model: /models/myllmbox/Qwen3.8-Flash-Next-hibrid46   # == hf.co/myllmbox/Qwen3.8-Flash-Next-hibrid46
+  cache: recipes/qwen38-flash-next-cluster/.data/cache
+  min_avail_gb: 100                             # wait for unified memory after a teardown (phantom OOM otherwise)
+
+  env:
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    HF_HUB_DISABLE_XET: "1"
+    VLLM_PLE_CPU_OFFLOAD: "1"                     # the vendor's offload switch — int3 table resident in the worker
+    MBX_PLE_MULTINODE: "1"                        # this image's patch: one full-table worker PER NODE (upstream
+                                                  # refuses offload at nnodes=2 without it)
+    TORCH_CUDA_ARCH_LIST: "12.1a"
+    FLASHINFER_CUDA_ARCH_LIST: "12.1a"
+    FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
+    VLLM_CACHE_ROOT: /cache/vllm-cache            # persistent compile/autotune cache — TP=2 shapes are new, one-time
+    OMP_NUM_THREADS: "8"                          # matched to the 10-core pin
+    MBX_VOCAB_GEMV: "1"                           # championship-proven (+5.5% steps)
+    VLLM_MARLIN_USE_ATOMIC_ADD: "1"               # Marlin small-N fast path (self-gating)
+    # RoCE NCCL over ConnectX — the runner pins NCCL_SOCKET_IFNAME / NCCL_IB_HCA / GLOO / VLLM_HOST_IP per box
+    # from cluster.yaml and opens /dev/infiniband + IPC_LOCK + memlock (the 2026-09-04 fix). These pin RoCE v2;
+    # identical to the vision lane that PROVED RDMA (port counters moving, 125 MB/s during decode).
+    NCCL_IB_GID_INDEX: "3"
+    NCCL_IB_ROCE_VERSION_NUM: "2"
+    NCCL_IB_ADDR_FAMILY: "AF_INET"
+    NCCL_CROSS_NIC: "1"
+    NCCL_IGNORE_CPU_AFFINITY: "1"
+    NCCL_CUMEM_ENABLE: "0"
+    NCCL_NVLS_ENABLE: "0"
+
+  vllm:
+    served-model-name: Qwen/Qwen3.8-Flash-Next    # same public name as the solo serve
+    pipeline-parallel-size: 1                     # PP unsupported on this model — TP only (TP=2 set by launcher)
+    distributed-executor-backend: mp              # dual-node = mp, no Ray (also the PLE worker spawn rule)
+    gpu-memory-utilization: 0.70                  # COLD-BOOT profile (experiment lesson 2026-08-28: load passed,
+                                                  # then compile+graph capture OOMed at 0.82). Per node: ~36G body
+                                                  # shard (91G − 18G table, halved) + 18G table in the worker →
+                                                  # ample KV even at 0.70. After the first healthy boot the compile
+                                                  # cache persists → raising to ~0.82 is the warm profile (user call).
+    # kv-cache-memory: pinned on the solo lane (18G); NOT pinned here until the TP=2 fit is measured on a real
+    # boot (house rule: no KV pin before the fit is proven). Read vLLM's "suggested" figure off the first boot.
+    kv-cache-memory: "46000000000"              # 46 GB/box ≈ 3.1M pooled tokens (vLLM fit figure at 0.70 was 39G;
+                                                  # 46 leaves ~11G host headroom; NEVER the 64G "fully utilize")
+    max-model-len: 262144
+    async-scheduling: true                        # as the published stack (corruption suspicion disproved by A/B)
+    max-num-seqs: 64                              # measured to 64 (667 code tok/s agg); KV ≈1.15%/request → ~85 seats max;
+                                                  # 52 and 64 are the efficient tops (56/60 pay a 64-sized step)
+    max-num-batched-tokens: 8192                  # as solo (also the image-encoder budget; see solo notes)
+    enable-prefix-caching: true                   # WATCH ITEM: mamba/GDN prefix-cache alignment (Saren) — as solo
+    enable-auto-tool-choice: true
+    tool-call-parser: qwen3_xml
+    reasoning-parser: qwen3
+    speculative-config: '{"method":"mtp","num_speculative_tokens":4}'   # K=4 (2026-09-05): acc 4.2 code / 2.7-3.1 thinking,
+                                                  # ~5% step cost vs K=3, net faster at every c; cap 5.0
+    # KV stays bf16 (vendor QSA guard refuses fp8 on this model — measured on solo, do not re-add)
+
+cluster:                                          # TP=2 across both Sparks over the ConnectX link
+  boxes: [box1, box2]                             # names → cluster.yaml; box1 = head (API), box2 joins --headless
+  master_port: 25000
+
+dashboard: sparkdash

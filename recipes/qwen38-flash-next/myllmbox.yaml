@@ -27,6 +27,7 @@ server:
                                                 # conversion at this path renames to ...-hibrid46-off
                                                 # first (the bf16-table reference lane's checkpoint).
   cache: recipes/qwen38-flash-next/.data/cache
+  min_avail_gb: 100                             # wait for unified memory after a teardown (phantom OOM otherwise)
 
   env:
     HF_HUB_OFFLINE: "1"

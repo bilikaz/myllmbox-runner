@@ -30,3 +30,12 @@ license). Kits are consumers only: no Dockerfile, no build machinery — the REA
 this folder for reproduction. Flags in a kit's recipe.yaml must equal the validated recipe lane's
 set at export time; no myllmbox internals may leak in; the kit must work on a fresh box with
 nothing but docker (+ optionally the hf CLI).
+
+**Cluster kits** (a model served across N boxes, e.g. `qwen38-flash-next-cluster-recipe`) extend the
+contract with `setup.sh` + `lib.sh`: `run.sh` runs `setup.sh` when no `cluster.env` exists — it
+installs an ssh key on the worker, probes both boxes, discovers the interconnect (bound pings across
+every non-management interface pair), probes the firewall root-free (listener + connect over the
+interconnect; a `ufw allow` is offered, consent-gated, only where a box blocks its peer), and writes
+`cluster.env` (machine-specific, gitignored). `recipe.yaml` stays model-only; the cluster flags and
+per-box NCCL/gloo pins are composed by `run.sh`. Containers get `--device /dev/infiniband
+--cap-add IPC_LOCK --ulimit memlock=-1:-1` or NCCL silently runs TCP; `view.sh` proves RDMA by counters.
