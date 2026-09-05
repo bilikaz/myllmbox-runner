@@ -196,13 +196,14 @@ def _prelaunch_memory(cfg: dict[str, Any]) -> None:
             if waited == 0:
                 log.info("memory: %s GiB available, need %d — waiting for unified memory to come back…", "/".join(map(str, avail)), need)
             time.sleep(5); waited += 5
-    model = str(s.get("model") or "")
-    if model.startswith("/models/") and s.get("models_dir"):
-        host_dir = str(Path(s["models_dir"]).expanduser().resolve() / model[len("/models/"):])
-        script = (f'for f in "{host_dir}"/*.safetensors; do [ -f "$f" ] && dd if="$f" iflag=nocache count=0 status=none 2>/dev/null; done; '
+    if s.get("models_dir"):
+        # EVERY checkpoint under models_dir, not just the one about to be served: a converter/rsync/previous serve
+        # leaves other models' shards in the cache too (seen: 121 GB cached, 0.8 GB free before a launch).
+        host_dir = str(Path(s["models_dir"]).expanduser().resolve())
+        script = (f'find "{host_dir}" -type f -name "*.safetensors" -exec dd if={{}} iflag=nocache count=0 status=none \\; 2>/dev/null; '
                   "awk '/^MemFree/{printf \"%d\", $2/1048576}' /proc/meminfo")
         free_after = [_node_sh(cfg, r, script) or "?" for r in range(len(ns))]
-        log.info("memory: evicted %s from the page cache on every node (no root) — MemFree now %s GiB", host_dir, "/".join(free_after))
+        log.info("memory: evicted all checkpoints under %s from the page cache on every node (no root) — MemFree now %s GiB", host_dir, "/".join(free_after))
 
 
 def start(cfg: dict[str, Any]) -> None:
