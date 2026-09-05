@@ -49,6 +49,7 @@ def main():
     ap.add_argument("--model", default="", help="served name (default: detected from /v1/models)")
     ap.add_argument("--text", action="append", default=[], help="text file to score (repeatable; default: the two gauntlet prompts)")
     ap.add_argument("--tag", default="", help="free label for this checkpoint/config (e.g. int3, ple4, bf16-table)")
+    ap.add_argument("--lane", default="", help="results sub-folder suffix: results/<model>--<lane>/")
     a = ap.parse_args()
     texts = a.text or [str(HERE / "pasture-text.txt"), str(HERE / "fish-text.txt")]
     if not a.model:
@@ -64,6 +65,8 @@ def main():
     avg = tot_lp / tot_n
     print(f"  {'POOLED':24s} tokens {tot_n:6d}  avg logprob {avg:8.4f}  ppl {math.exp(-avg):8.3f}", flush=True)
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", a.model).strip("-")
+    if a.lane:
+        slug += "--" + re.sub(r"[^A-Za-z0-9._-]+", "-", a.lane).strip("-")
     out = HERE / "results" / slug / f"logprob-{time.strftime('%Y%m%d-%H%M%S')}{'-' + a.tag if a.tag else ''}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"params": {"date": time.strftime("%Y-%m-%d %H:%M"), "url": a.url, "model": a.model, "tag": a.tag, "texts": texts},

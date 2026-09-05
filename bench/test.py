@@ -275,11 +275,13 @@ def run_hold(a, prompt, c):
           f"{fmt(summary['steps_ps'])} | {fmt(summary['acc_len'], 2)} | | per-stream {fmt(summary['per_stream'], 0)}; test.py |", flush=True)
 
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", a.model).strip("-")            # Qwen/Qwen3.8-Flash-Next → Qwen-Qwen3.8-Flash-Next
+    if a.lane:
+        slug += "--" + re.sub(r"[^A-Za-z0-9._-]+", "-", a.lane).strip("-")
     out = Path(a.json) if a.json else HERE / "results" / slug / f"{time.strftime('%Y%m%d-%H%M%S')}-c{c}.json"
     if a.json and "," in str(a.levels_raw):   # a ladder with one --json name → one file per rung
         out = out.with_name(f"{out.stem}-c{c}{out.suffix}")
     out.parent.mkdir(parents=True, exist_ok=True)
-    params = {"date": date, "url": a.url, "model": a.model, "c": c, "watched": period, "cap_seconds": a.seconds, "warmup": a.warmup,
+    params = {"date": date, "url": a.url, "model": a.model, "lane": a.lane, "c": c, "watched": period, "cap_seconds": a.seconds, "warmup": a.warmup,
               "sample": a.sample, "thinking": a.thinking, "prompt": a.prompt, "max_tokens": a.max_tokens,
               "temperature": a.temperature, "top_p": a.top_p, "tag": a.tag}
     out.write_text(json.dumps({"params": params, "summary": summary, "samples": samples, "requests": log}, indent=1))
@@ -305,6 +307,7 @@ def main():
     ap.add_argument("--k", type=int, default=0, help="num_speculative_tokens — only needed if the engine lacks the drafts counter")
     ap.add_argument("--timeout", type=int, default=1800, help="per-request timeout (s)")
     ap.add_argument("--tag", default="test")
+    ap.add_argument("--lane", default="", help="results sub-folder suffix: results/<model>--<lane>/ (keep A/B lanes of the SAME served name apart)")
     ap.add_argument("--json", default="", help="output path (default bench/results/<model>/<timestamp>-c<N>.json)")
     a = ap.parse_args()
 

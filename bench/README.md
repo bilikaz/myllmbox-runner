@@ -108,6 +108,8 @@ blocks raw ports) or through the proxy with `--token`. The served model is auto-
   `--seconds 0` = no cap.
 - A ladder (`--c 8,16,32`) runs rung after rung; each rung drains fully before the next fires. Repeats
   (`--c 1,1,1`) are fine — repeatability for free.
+- `--lane <name>` → results go to `results/<model>--<name>/` so A/B lanes that serve the SAME model name (e.g. the
+  cluster recipe vs its -test lane) never pool together; `summary.py --model <model>--<name>` reads one lane.
 - `--thinking on|off` → the model's own `enable_thinking` switch. `--prompt code` (built-in LRU-cache task,
   short), `pasture` / `fish` (the gauntlet texts — long, hold a rung for minutes), or any file path.
 - Output: live line per sample; a summary of avg (min–max) over the steady samples for gen tok/s, per-stream,
