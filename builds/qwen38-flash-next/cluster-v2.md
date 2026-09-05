@@ -15,7 +15,9 @@ Gate: `MBX_LOAD_DROP_CACHE=0` disables. Default ON.
 
 ## Validation
 - Build: both patches applied + asserted (Dockerfile sanity step), vllm imports.
-- Runtime with v2: **pending** — the kit's next `./run.sh` pulls v2. (The kit reached healthy on 2026-09-05 19:32
+- Runtime with v2: **validated 2026-09-05 20:03** — kit boot on 2× Spark reached healthy (head load 412 s, worker
+  243 s, KV 2,805,498 tokens). Page cache stayed at 16–22 GB THROUGH the load and 10 GB after (every earlier boot
+  climbed to 60–70 GB); MemFree held ≥ 50 GB during the shard copies. No stall. (The kit reached healthy on 2026-09-05 19:32
   with v1 + the kit-side fixes: plain models/ mount with a real dir, head-first launch, memory gate, unprivileged
   `dd iflag=nocache` eviction of the checkpoint before launch; head load 351 s, worker 180 s, KV 2,805,498 tokens.)
 
