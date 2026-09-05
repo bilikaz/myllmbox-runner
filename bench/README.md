@@ -87,9 +87,56 @@ LTX-class pipelines snap dims to /64, so the tiers land on slightly non-standard
   `./bench/gauntlet-video.py <ip:port|url> [--size 1280x704] [--frames 121] [--fps 24] [--token …]`
   Both video prompts × the canonical seeds at the canonical clip spec, saves mp4s +
   `run.json` to `results/<name>/`.
-- **`sweep.py`** — the LLM concurrency harness: one fixed prompt (+ nonce to defeat prefix
-  caching) at increasing concurrency, client-side aggregate tok/s + acceptance from /metrics,
-  ready-to-paste reports.md rows.
+### LLM speed: `test.py` → `summary.py`
+
+Two tools, one flow: **`test.py` measures** (one rung or a ladder, one JSON per run), **`summary.py` pools**
+(every run of a model → one table). Both are stdlib-only; run them ON the serving box (the management LAN
+blocks raw ports) or through the proxy with `--token`. The served model is auto-detected from `/v1/models`.
+
+**`test.py` — hold a concurrency, measure the steady state.**
+```
+./bench/test.py --c 8 --thinking off --prompt pasture                 # one rung
+./bench/test.py --c 1,1,1,2,4,8,16,32,64 --thinking off --prompt pasture --seconds 400 --warmup 40   # a ladder
+```
+- Fires exactly C streams ONCE, together, with a big token budget (`--max-tokens`, default 32768). NO re-firing:
+  a fresh request mid-window drags a prefill into the decode numbers.
+- Samples the engine's `/metrics` every 10 s. A sample is **steady** only when all C streams are running AND the
+  prompt-token counter did not move (pure decode). Everything else is printed but not counted.
+- The window = `--warmup` (30 s, covers the C prefills) + `--seconds` measured (600 s default), or until the first
+  stream finishes, whichever comes first. Either way the window's end ABORTS every remaining stream (requests are
+  streamed; closing them makes vLLM drop them) so the next rung starts at once — nobody waits for stragglers.
+  `--seconds 0` = no cap.
+- A ladder (`--c 8,16,32`) runs rung after rung; each rung drains fully before the next fires. Repeats
+  (`--c 1,1,1`) are fine — repeatability for free.
+- `--thinking on|off` → the model's own `enable_thinking` switch. `--prompt code` (built-in LRU-cache task,
+  short), `pasture` / `fish` (the gauntlet texts — long, hold a rung for minutes), or any file path.
+- Output: live line per sample; a summary of avg (min–max) over the steady samples for gen tok/s, per-stream,
+  **engine steps/s** (ms/step), acceptance, running, KV%; the watched period; a reports.md row. Every run is
+  saved as **`results/<model>/<timestamp>-c<N>.json`** — `params` first, then `summary`, `samples`, `requests`.
+
+**`summary.py` — pool the runs into a ladder table.**
+```
+./bench/summary.py                                              # one model folder → picked automatically
+./bench/summary.py --model Qwen/Qwen3.8-Flash-Next --start 2026-09-05 --prompt pasture      # code + thinking + average
+```
+- Groups the selected runs by rung c, pools the STEADY samples of all runs in a group, and prints: runs · samples ·
+  gen tok/s · per-stream · engine steps/s · ms/step · acc len · KV% — each avg (min–max) — plus finished/aborted
+  request counts. Markdown, ready to paste into a recipe's reports.md.
+- **Bands:** thinking OFF runs = the **code** band, thinking ON = the **thinking** band. `--thinking off|on` prints
+  one band with every metric; `--thinking both` (default) prints ONE combined table, a row per rung: code tok/s +
+  per-stream · thinking tok/s + per-stream · **AVERAGE** tok/s = (code band avg + thinking band avg) / 2 — arithmetic,
+  NOT a pooled sample mean, so the band with more samples does not pull the result — and AVERAGE per-stream = that / c,
+  plus steps/s and acceptance for both bands. Runs/samples/KV live only in the single-band tables.
+- `--start` / `--end` take `YYYY-MM-DD` or `YYYY-MM-DD HH:MM` (a bare `--end` date = the whole day; default now).
+  `--json <path>` dumps the same numbers.
+
+**Reading the numbers (the two that matter):**
+- **engine steps/s** = drafts ÷ running requests per second — the raw engine speed, independent of what the model
+  is writing. Judge kernels, TP, K, images, boxes by THIS. (The `/metrics` drafts counter is per sequence per
+  step; test.py and summary.py divide it back out — the engine's own log line `Drafted throughput ÷ K` at c=1
+  is the same number.)
+- **acceptance length** = tokens per step per sequence — set by the content and the checkpoint, capped at K+1.
+  gen tok/s = steps × acceptance × running: the same engine reads 45 tok/s on prose and 70 on code.
 
 ## LLM speed methodology (text models)
 
