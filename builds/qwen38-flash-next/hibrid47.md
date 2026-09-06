@@ -1,6 +1,8 @@
 # hf.co/myllmbox/Qwen3.8-Flash-Next-hibrid47 — the NVFP4-table checkpoint
 
-**Built:** 2026-09-06 (as `…-hibrid46-ple4`, renamed hibrid47 on release). **Size:** 98.9 GiB, 27 shard files.
+**Published:** 2026-09-06 17:3x — https://huggingface.co/myllmbox/Qwen3.8-Flash-Next-hibrid47 (commit `7b83fa0d`, 40 files, 27 shards, 98.9 GiB;
+uploaded from ai1 via the v1 image's `hf` 1.28 + xet — body shards deduplicated against hibrid46, ~2.6 GB actually transferred).
+**Built:** 2026-09-06 (as `…-hibrid46-ple4`, renamed hibrid47 on release; local dirs renamed on both boxes). **Size:** 98.9 GiB, 27 shard files.
 **Source:** hibrid46 (body tensors, hardlinked = byte-identical) + the bf16 PLE table from hibrid46-off (128 shards of
 [2,500,012 × 160] = 320,001,536 rows), re-quantized to NVFP4 by `docker/make-hibrid47.py` (two streaming passes:
 global amax → per-16 block fp8 scale, codes nearest-to-EFFECTIVE scale; ~200 MB working set; ran next to a serve).
