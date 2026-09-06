@@ -8,7 +8,7 @@ bf16 copies; our images carry MBX_INDEX_STRICT to skip them). A public checkpoin
 ZERO patches, so this tool walks model.safetensors.index.json and re-serializes every tensor into
 fresh shards — each tensor exists exactly once, exactly where the index says.
 
-  ./scripts/export-hf-checkpoint.py /models/myllmbox/Qwen3.8-Flash-Next-hibrid46 \
+  ./builds/qwen38-flash-next/docker/export-hf-checkpoint.py /models/myllmbox/Qwen3.8-Flash-Next-hibrid46 \
       /models/export/Qwen3.8-Flash-Next-hibrid46-hf [--shard-gb 4]
 
 Copies every non-shard file (config.json with its quantization_config, tokenizer, README if

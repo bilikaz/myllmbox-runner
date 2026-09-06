@@ -39,3 +39,10 @@ interconnect; a `ufw allow` is offered, consent-gated, only where a box blocks i
 `cluster.env` (machine-specific, gitignored). `recipe.yaml` stays model-only; the cluster flags and
 per-box NCCL/gloo pins are composed by `run.sh`. Containers get `--device /dev/infiniband
 --cap-add IPC_LOCK --ulimit memlock=-1:-1` or NCCL silently runs TCP; `view.sh` proves RDMA by counters.
+
+## Release tools (per model, under `<model>/docker/`)
+- `make-hibrid46.py`, `make-hibrid47.py` — the converters that made the published checkpoints.
+- `export-hf-checkpoint.py` — repack a hardlinked hibrid dir into clean single-copy shards (every tensor exactly once,
+  where the index says) before `hf upload`; needed whenever a converter rewrote tensors INSIDE shared shard files.
+  hibrid47 did not need it (19 shards are hibrid46's clean ones, the 8 table shards were written fresh).
+
