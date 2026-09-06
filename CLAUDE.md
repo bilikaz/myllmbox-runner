@@ -99,6 +99,9 @@ addresses in `cluster.yaml`.
 - Each Spark has ~119G usable unified memory. A 304B model serve holds ~100G/node; a source compile peaks
   ~20–30G. **They don't both fit** → it's **serve XOR build** on the same box. Throttle a coexisting build with
   `BUILD_JOBS=6 ./build-and-copy.sh …`, or take the serve down first.
+- **`vm.compaction_proactiveness=0` on every serve box** (`cluster/server-profile.sh` sets it). The kernel's proactive
+  page compactor migrates GPU-mapped pages on a UMA box: ~4 s stalls every ~37 s, −10 % on any serve running <~10 GB
+  free. Periodic clockwork dips → check `kcompactd0` CPU ticks against the token counter FIRST.
 - **Never take a serving box down without asking.** UMA over-commit has needed a hard power cycle; a running
   serve is hard-won. Keep `gpu_memory_utilization` ≤ ~0.83.
 - Prefer building **our own** image from a recipe `Dockerfile` (source, pinned vLLM ref) over pulling someone's

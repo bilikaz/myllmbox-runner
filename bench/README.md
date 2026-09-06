@@ -140,6 +140,25 @@ blocks raw ports) or through the proxy with `--token`. The served model is auto-
 - **acceptance length** = tokens per step per sequence — set by the content and the checkpoint, capped at K+1.
   gen tok/s = steps × acceptance × running: the same engine reads 45 tok/s on prose and 70 on code.
 
+### Acceptance by draft position: `test.py` samples it, `accept.py` reads it off any log window
+
+Acceptance length alone hides WHERE the drafter fails. With K drafts per step the engine also counts, per position,
+how often draft i was accepted; `test.py` samples those counters (`vllm:spec_decode_num_accepted_tokens_per_pos_total`)
+per 10 s bin and reports them as **P(pos i accepted)**, avg (min–max), e.g. `p1 0.95  p2 0.90  p3 0.85  p4 0.80`
+(acc len = 1 + Σ). `summary.py` shows the per-position averages as a `p1/p2/p3/p4` column (runs recorded before
+2026-09-06 show `—`). Reading it: a low p1 = the target's sampling disagrees with the drafter's first guess (text
+entropy, temperature) — no drafter fixes that; p2..p4 falling faster than p1 = the drafter's OWN chain breaking
+(where a better drafter or a smaller K shows up). Sampling matters: the bench and any client inherit the model's
+`generation_config.json` (Qwen3.8: temperature 1.0, top_k 20, top_p 0.95), so acceptance figures are comparable
+across clients, and greedy would read higher everywhere.
+
+**`accept.py` — the same report for a window the bench did NOT drive** (the visual gauntlet, a real agent session):
+```
+./bench/accept.py --since 13:05 [--until 13:40] [--host 192.168.1.66] [--container mbx-vllm]
+```
+Parses the engine log's 10 s `SpecDecoding metrics` lines in that window (local clock; skips idle and prefill bins)
+and prints gen tok/s, engine steps/s (drafted ÷ 10 ÷ K ÷ running), acc len and P(pos i) — weighted by drafted tokens.
+
 ## LLM speed methodology (text models)
 
 - **Decode** numbers come from clean 10-second engine windows: single stream, zero prompt

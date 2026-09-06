@@ -41,6 +41,7 @@ CODE_PROMPT = ("Write a complete, production-quality Python implementation of an
 M_GEN, M_DRAFTS, M_DTOK, M_ACC = ("vllm:generation_tokens_total", "vllm:spec_decode_num_drafts_total",
                                   "vllm:spec_decode_num_draft_tokens_total", "vllm:spec_decode_num_accepted_tokens_total")
 M_RUN, M_WAIT, M_PROMPT = "vllm:num_requests_running", "vllm:num_requests_waiting", "vllm:prompt_tokens_total"
+M_ACC_POS = "vllm:spec_decode_num_accepted_tokens_per_pos_total"     # one series per draft position (label position="i")
 M_KV = ("vllm:kv_cache_usage_perc", "vllm:gpu_cache_usage_perc")   # name changed across vLLM versions
 
 
@@ -62,6 +63,16 @@ def _sum(text, name):
     for m in re.finditer(rf'^{re.escape(name)}(?:\{{[^}}]*\}})?\s+([0-9.eE+-]+)$', text, re.M):
         tot += float(m.group(1)); found = True
     return tot if found else None
+
+
+def _per_pos(text):
+    """[accepted-at-position-0, -1, ...] cumulative counters (None if the server has no per-position series)."""
+    out = {}
+    for m in re.finditer(rf'^{re.escape(M_ACC_POS)}\{{([^}}]*)\}}\s+([0-9.eE+-]+)$', text, re.M):
+        pm = re.search(r'position="(\d+)"', m.group(1))
+        if pm:
+            out[int(pm.group(1))] = out.get(int(pm.group(1)), 0.0) + float(m.group(2))
+    return [out[i] for i in range(len(out))] if out and set(out) == set(range(len(out))) else None
 
 
 def _first(text, names):
@@ -152,7 +163,7 @@ def sample_loop(a, t_start, deadline, samples):
         m = _metrics(a.url, a.token)
         cur = {"t": now, "gen": _sum(m, M_GEN), "drafts": _sum(m, M_DRAFTS), "dtok": _sum(m, M_DTOK),
                "acc": _sum(m, M_ACC), "running": _sum(m, M_RUN), "waiting": _sum(m, M_WAIT), "kv": _first(m, M_KV),
-               "prompt": _sum(m, M_PROMPT)}
+               "prompt": _sum(m, M_PROMPT), "acc_pos": _per_pos(m)}
         if prev and cur["gen"] is not None and prev["gen"] is not None:
             dt = cur["t"] - prev["t"]
             s = {"t": round(now - t_start), "dt": round(dt, 1), "running": cur["running"], "waiting": cur["waiting"],
@@ -165,6 +176,8 @@ def sample_loop(a, t_start, deadline, samples):
                 s["steps_ps"] = dd / dt / (cur["running"] or 1)               # ENGINE steps/s
                 s["acc_len"] = 1 + (cur["acc"] - prev["acc"]) / dd if cur["acc"] is not None else None
                 s["k"] = (cur["dtok"] - prev["dtok"]) / dd if cur["dtok"] is not None else None
+                if cur["acc_pos"] and prev["acc_pos"] and len(cur["acc_pos"]) == len(prev["acc_pos"]):
+                    s["acc_pos"] = [(c1 - p1) / dd for c1, p1 in zip(cur["acc_pos"], prev["acc_pos"])]   # P(position i accepted)
             elif cur["dtok"] is not None and prev["dtok"] is not None and a.k:
                 s["steps_ps"] = (cur["dtok"] - prev["dtok"]) / a.k / dt / (cur["running"] or 1)   # fallback: drafted ÷ K ÷ running
                 s["acc_len"] = None
@@ -236,6 +249,8 @@ def run_hold(a, prompt, c):
         "per_stream": stats([s["per_stream"] for s in steady]),
         "steps_ps": stats([s["steps_ps"] for s in steady]),
         "acc_len": stats([s["acc_len"] for s in steady]),
+        "acc_pos": [stats([s["acc_pos"][i] for s in steady if s.get("acc_pos") and len(s["acc_pos"]) > i])
+                    for i in range(max((len(s["acc_pos"]) for s in steady if s.get("acc_pos")), default=0))],
         "running": stats([s["running"] for s in held]),
         "kv_pct": stats([s["kv_pct"] for s in held]),
         "samples_total": len(samples), "samples_steady": len(steady),
@@ -263,6 +278,9 @@ def run_hold(a, prompt, c):
     print(f"  per-stream  avg (min–max): {fmt(summary['per_stream'])}", flush=True)
     print(f"  steps/s     avg (min–max): {fmt(summary['steps_ps'])}   (engine steps; ms/step avg {1000/summary['steps_ps']['avg']:.0f})" if summary['steps_ps'] else "  steps/s     —", flush=True)
     print(f"  acc len     avg (min–max): {fmt(summary['acc_len'], 2)}", flush=True)
+    if summary["acc_pos"]:
+        print("  acc by pos  avg (min–max): " + "  ".join(f"p{i+1} {fmt(p, 2)}" for i, p in enumerate(summary["acc_pos"]) if p)
+              + "   (P(draft i accepted); acc len = 1 + Σ)", flush=True)
     print(f"  running     avg (min–max): {fmt(summary['running'])}   kv% {fmt(summary['kv_pct'])}", flush=True)
     if summary["samples_steady"] < max(3, len(held) // 2):
         print("  ⚠ few steady samples — rung not held (max-num-seqs below c? streams finished early → raise --max-tokens; prefill spilling past --warmup → raise it)", flush=True)
@@ -272,7 +290,8 @@ def run_hold(a, prompt, c):
     date = time.strftime("%Y-%m-%d %H:%M")
     print("\n# reports.md row:", flush=True)
     print(f"| {date} | | {c} | {a.prompt} thinking {a.thinking} (steady {period['steady_seconds']}s of {period['seconds']}s watched) | {fmt(summary['gen_tps'], 0)} | "
-          f"{fmt(summary['steps_ps'])} | {fmt(summary['acc_len'], 2)} | | per-stream {fmt(summary['per_stream'], 0)}; test.py |", flush=True)
+          f"{fmt(summary['steps_ps'])} | {fmt(summary['acc_len'], 2)} | | per-stream {fmt(summary['per_stream'], 0)}"
+          + (("; acc by pos " + "/".join(f"{p['avg']:.2f}" for p in summary["acc_pos"] if p)) if summary["acc_pos"] else "") + "; test.py |", flush=True)
 
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", a.model).strip("-")            # Qwen/Qwen3.8-Flash-Next → Qwen-Qwen3.8-Flash-Next
     if a.lane:

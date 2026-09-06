@@ -45,3 +45,10 @@ ladder, all 21 rungs, and the run log: `reports.md`. Regenerate: `./bench/summar
 ## Knobs left for after the first boot
 `gpu-memory-utilization` 0.70 is the cold-boot profile; `kv-cache-memory` is unpinned until the TP=2 fit is
 read off a real boot. Both are config decisions, recorded in `reports.md` when measured.
+
+## Box tuning that is not in the yaml
+`vm.compaction_proactiveness=0` on every box (`cluster/server-profile.sh` sets it; persisted in
+`/etc/sysctl.d/99-myllmbox-compaction.conf`). Found 2026-09-06 on the `-test` lane: at 5–7 GB free the kernel's
+proactive compactor migrated GPU-mapped pages every ~37 s → 4–5 s at −30 % step rate, both ranks idling, no swap,
+clocks flat. With the sysctl: c=32 steps 3.7 → 4.1–4.3. This boot (20 GB free) never triggered it, which is why
+the ladder above is clean — a tighter pin on the same boxes would not have been.

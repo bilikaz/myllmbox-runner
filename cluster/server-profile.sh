@@ -10,6 +10,7 @@
 #   • desktop + peripheral services disabled (see DISABLE) — a headless, ssh-only, monitor-less box needs none
 #   • journald capped so logs never eat RAM/disk on a long-lived server
 #   • (optional) an NVMe swapfile + low vm.swappiness as cold-start OOM insurance
+#   • vm.compaction_proactiveness=0 — proactive page compaction stalls a UMA GPU every ~37 s on a tight serve (-10%)
 #
 # ── NEVER TOUCHED (hardcoded KEEP guard — a typo in DISABLE can't reach these) ─────────────────────
 #   rdma-ndd  nvidia-persistenced  systemd-oomd  ssh sshd docker containerd NetworkManager
@@ -92,6 +93,7 @@ systemctl set-default graphical.target
 systemctl unmask ${EFF_STR} 2>/dev/null || true
 systemctl enable ${EFF_STR} 2>/dev/null || true
 rm -f /etc/sysctl.d/99-myllmbox-swap.conf; sysctl -q vm.swappiness=60 || true
+rm -f /etc/sysctl.d/99-myllmbox-compaction.conf; sysctl -q vm.compaction_proactiveness=20 || true
 rm -f /etc/systemd/journald.conf.d/99-myllmbox.conf
 echo "  reverted to desktop profile (reboot to restore GUI)"
 R
@@ -110,6 +112,10 @@ if [ -n "\$snaps" ]; then
 else
   echo "  → snapd: none found / unresponsive — left untouched"
 fi
+echo "  → vm.compaction_proactiveness=0 (kernel page compaction migrates GPU-mapped pages on a UMA box: ~37 s"
+echo "    clockwork stalls, ~10% throughput on a tight serve; a serve allocates once, huge-page upkeep buys nothing)"
+printf 'vm.compaction_proactiveness = 0\n' > /etc/sysctl.d/99-myllmbox-compaction.conf
+sysctl -q vm.compaction_proactiveness=0 || true
 echo "  → journald cap: 500M"
 mkdir -p /etc/systemd/journald.conf.d
 printf '[Journal]\nSystemMaxUse=500M\nRuntimeMaxUse=100M\n' > /etc/systemd/journald.conf.d/99-myllmbox.conf

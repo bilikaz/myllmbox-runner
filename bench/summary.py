@@ -71,6 +71,12 @@ def st(xs):
     return {"avg": sum(xs) / len(xs), "min": min(xs), "max": max(xs), "n": len(xs)} if xs else None
 
 
+def fpos(ps):
+    """per-position acceptance averages as p1/p2/p3/p4 ('—' when the runs predate the per-position sampling)."""
+    ps = [p for p in (ps or []) if p]
+    return "/".join(f"{p['avg']:.2f}" for p in ps) if ps else "—"
+
+
 def fmt(s, nd=1):
     return "—" if not s else f"{s['avg']:.{nd}f} ({s['min']:.{nd}f}–{s['max']:.{nd}f})"
 
@@ -142,6 +148,8 @@ def main():
                 "per_stream": st([s.get("per_stream") for s in smp]),
                 "steps_ps": st([engine_steps(s) for s in smp]),
                 "acc_len": st([s.get("acc_len") for s in smp]),
+                "acc_pos": [st([s["acc_pos"][i] for s in smp if s.get("acc_pos") and len(s["acc_pos"]) > i])
+                            for i in range(max((len(s["acc_pos"]) for s in smp if s.get("acc_pos")), default=0))],
                 "kv_pct": st([s.get("kv_pct") for s in smp]),
                 "finished": sum((r["summary"].get("requests_completed") or 0) - (r["summary"].get("requests_aborted_by_cap") or 0) for r in rs),
                 "aborted": sum(r["summary"].get("requests_aborted_by_cap") or 0 for r in rs),
@@ -173,16 +181,16 @@ def main():
     def table(title, rows):
         print(f"\n## {title}")
         ex = "| prompt " if split_prompt else ""
-        print(f"| c {ex}| runs | samples | gen tok/s avg (min–max) | per-stream | engine steps/s | ms/step | acc len | kv % | finished/aborted |")
-        print(f"|---{'|---' if split_prompt else ''}|---|---|---|---|---|---|---|---|---|")
+        print(f"| c {ex}| runs | samples | gen tok/s avg (min–max) | per-stream | engine steps/s | ms/step | acc len | acc by pos p1/p2/p3/p4 | kv % | finished/aborted |")
+        print(f"|---{'|---' if split_prompt else ''}|---|---|---|---|---|---|---|---|---|---|")
         for r in rows:
             e = f"| {r['prompt']} " if split_prompt else ""
             if r.get("note"):
-                print(f"| {r['c']} {e}| {r['runs']} | {r['samples']} | — ({r['note']}) | — | — | — | — | — | {r['finished']}/{r['aborted']} |")
+                print(f"| {r['c']} {e}| {r['runs']} | {r['samples']} | — ({r['note']}) | — | — | — | — | — | — | {r['finished']}/{r['aborted']} |")
                 continue
             ms = f"{1000 / r['steps_ps']['avg']:.0f}" if r["steps_ps"] else "—"
             print(f"| {r['c']} {e}| {r['runs']} | {r['samples']} | {fmt(r['gen_tps'])} | {fmt(r['per_stream'])} | "
-                  f"{fmt(r['steps_ps'])} | {ms} | {fmt(r['acc_len'], 2)} | {fmt(r['kv_pct'])} | {r['finished']}/{r['aborted']} |")
+                  f"{fmt(r['steps_ps'])} | {ms} | {fmt(r['acc_len'], 2)} | {fpos(r.get('acc_pos'))} | {fmt(r['kv_pct'])} | {r['finished']}/{r['aborted']} |")
 
     lo, hi = min(r["when"] for r in runs), max(r["when"] for r in runs)
     clock = lambda t: time.strftime("%Y-%m-%d %H:%M", time.localtime(t))
@@ -205,8 +213,8 @@ def main():
         ex = "| prompt " if split_prompt else ""
         print(f"\n| c {ex}| MAX tok/s | AVERAGE tok/s | MIN tok/s | AVERAGE /stream | "
               f"code tok/s avg (min–max) | code /stream | thinking tok/s avg (min–max) | thinking /stream | "
-              f"steps/s avg (min–max) | acc avg (min–max) |")
-        print(f"|---{'|---' if split_prompt else ''}|---|---|---|---|---|---|---|---|---|---|")
+              f"steps/s avg (min–max) | acc avg (min–max) | acc by pos code / thinking |")
+        print(f"|---{'|---' if split_prompt else ''}|---|---|---|---|---|---|---|---|---|---|---|")
         f1 = lambda st, nd=1: "—" if not st else f"{st['avg']:.{nd}f}"
         for k in sorted(set(ci) | set(ti)):
             c, t = ci.get(k), ti.get(k)
@@ -220,7 +228,8 @@ def main():
             print(f"{fmt(c['gen_tps']) if c else '—'} | {f1(c['per_stream']) if c else '—'} | "
                   f"{fmt(t['gen_tps']) if t else '—'} | {f1(t['per_stream']) if t else '—'} | "
                   f"{fmt(sp) if sp else (fmt(c['steps_ps']) if c else fmt(t['steps_ps']))} | "
-                  f"{fmt(ac, 2) if ac else (fmt(c['acc_len'], 2) if c else fmt(t['acc_len'], 2))} |")
+                  f"{fmt(ac, 2) if ac else (fmt(c['acc_len'], 2) if c else fmt(t['acc_len'], 2))} | "
+                  f"{fpos(c.get('acc_pos')) if c else '—'} / {fpos(t.get('acc_pos')) if t else '—'} |")
         if not (code and think):
             print(f"\n(only the {'code' if code else 'thinking'} band has runs — AVERAGE column empty)")
     rows = tables
