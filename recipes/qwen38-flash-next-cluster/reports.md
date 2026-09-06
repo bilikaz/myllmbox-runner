@@ -109,3 +109,42 @@ Polluted c56/c60 runs (20:07–20:22) deleted; rungs 56/60 = 2 clean runs each. 
 | 56 | 627 | **469** | 322 | **8.4** | 576.4 (523.4–627.2) | 10.3 | 362.5 (322.5–412.1) | 6.5 | 2.4 (2.2–2.6) | 3.45 (2.55–4.48) |
 | 60 | 643 | **483** | 347 | **8.0** | 588.8 (538.3–643.0) | 9.8 | 376.8 (347.3–490.2) | 6.3 | 2.3 (2.1–2.6) | 3.46 (2.58–4.47) |
 | 64 | 721 | **540** | 346 | **8.4** | 666.5 (598.4–721.3) | 10.4 | 413.2 (346.5–494.9) | 6.5 | 2.4 (2.1–2.7) | 3.45 (2.55–4.42) |
+
+---
+# v2 — hibrid47 (NVFP4 table on the GPU), 2026-09-06
+Development happened in `recipes/qwen38-flash-next-cluster-test/` (gitignored lane; its reports.md has the boot-by-boot
+log). Summary of what moved into this recipe:
+
+- **Checkpoint:** hibrid46 body + PLE table bf16 → NVFP4 (block 16, 28.6 GiB, 8 shards) = hibrid47, published
+  hf.co/myllmbox/Qwen3.8-Flash-Next-hibrid47 (commit 7b83fa0d). Converter: docker/make-hibrid47.py.
+- **Engine:** patch 03 — `_MbxNvfp4EmbeddingMethod`; table sharded over TP or replicated (`MBX_PLE_REPLICATE=1`).
+  c=1 steps: sharded 17.1 (kv 40 G, compactor ON) vs replicated 17.3 (kv 25 G, compactor ON) → exchange cost ≈ 1 %.
+- **Host:** `vm.compaction_proactiveness=0`. The ~37 s clockwork dips (4–5 s at −30 %) were kcompactd migrating GPU-mapped
+  pages on a box with 5–7 GB free; every other suspect was measured out (dashboard poll, tunnel, cpuset, KV block
+  boundaries, clocks/thermal, RoCE counters, kswapd/swap, PLE exchange). Same boot, live sysctl: c=32 3.7 → 4.1 steps.
+
+## Replicated table, kv 25 G, fresh reboot 10:46, compactor off — the v2 measurement (pasture, thinking off)
+| c | runs | gen tok/s avg | steady peak | steps/s | acc |
+|---|---|---|---|---|---|
+| 1 | 7 | 70 · 73 · 76 · 76 · 74 · 69 · 70 | 80 | 17.6–17.8 | 3.89–4.28 |
+| 2 | 6 | 129 · 127 · 124 · 126 · 124 · 124 | 133 | 15.0–15.3 | 4.06–4.28 |
+| 4 | 5 | 198 · 199 · 194 · 197 · 201 | 209 | 11.7–11.9 | 4.09–4.28 |
+| 8 | 4 | 295 · 292 · 296 · 293 | 309 | 8.8–8.9 | 4.11–4.19 |
+| 16 | 4 | 415 · 421 · 417 · 415 | 451 | 6.2 | 4.17–4.21 |
+| 24 | 3 | 488 · 489 · 486 | 514 | 4.8–4.9 | 4.17–4.19 |
+| 32 | 3 | 531 · 535 · 534 | 561 | 4.0 | 4.18–4.21 |
+Fish, c=32, 7 runs across two boots of the same config: 521 · 519 · ~510 · 517 (morning) · 512 · 513 · 509 (afternoon,
+not rebooted, 2 GB swap) → 517 / 511; steps 4.0–4.1; acc 3.97–4.04; steady peak 579. Boot state is worth ~1 %.
+Thinking, c=32 (visual client, boss-animals): 321.6 tok/s, steps 4.01, acc 2.51, P(pos) 0.64/0.42/0.27/0.18.
+
+## bf16 drafter experts A/B (recipes/qwen38-flash-next-mtp-test) — REJECTED
+4 vs 4 runs, c=32 fish, same afternoon: 511 (ple4) vs 505 (bf16), ms/step 249–251 vs 252–255, acc 4.00 vs 4.01. +3.4 GB.
+
+## Quality gauntlet (13:05–16:33, 32 × boss-animals, c=32, thinking on)
+26 good/super · 3 partial · 3 broken (int3 ≈ 16/16). Host over 3.5 h: swap-ins ≈ 15 MB, kcompactd 0 ticks.
+
+## Open
+- Sharded table at kv 40 G with the compactor off = THIS yaml's first boot. Expect 17.6–17.7 / 4.0; then rungs 40–64.
+- Worker host RSS 8 GiB: 3.4 GiB glibc heap retained from load (malloc_trim candidate for the next image), 2.7 GiB
+  vLLM shm ring, 1.25 GiB anon.
+- Fresh-reboot ladder on the winning layout, both bands → kit v2 README table.
