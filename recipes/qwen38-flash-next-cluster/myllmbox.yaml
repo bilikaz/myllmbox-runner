@@ -1,15 +1,9 @@
 # Qwen3.8-Flash-Next — THE PUBLISHED STACK v2: hibrid47, TP=2 ACROSS BOTH SPARKS over RDMA (2026-09-06).
 # hibrid47 = hibrid46's body + the PLE n-gram table re-quantized to NVFP4 and held RESIDENT ON THE GPU (patch 03 in
-# the Dockerfile): no CPU offload worker, no per-step IPC detour. Measured against the int3/offload stack on the
-# same boxes, same tests, same day: engine steps +8–11 % on every rung (c=1 17.7 vs 16.4; c=32 4.0 vs 3.7), 80 tok/s
-# single-stream peak (76 avg), 533 @ c=32; boss-animals render gauntlet 26/32 vs ~16/32. See README.md / reports.md.
-#
-# Two table layouts, one env knob:
-#   sharded over TP (default) — 14.4 GiB/box, ~50 GiB load/box, the gathered rows all-reduced per step (tiny);
-#                               steps at c=1 within 1 % of replicated; leaves room for a 40–46 G KV pin (80+ seats).
-#   MBX_PLE_REPLICATE: "1"    — full 28.6 GiB table per box, no all-reduce; 65 GiB load/box → KV pin ≤ 25 G (49 seats).
-#                               Measured 2026-09-06 (kv 25 G): 17.7 steps c=1, 4.0–4.1 c=32. The A/B base.
-# THIS FILE = sharded, kv 40 G: its first boot IS the sharded measurement at this pin (compare with reports.md).
+# the Dockerfile; MBX_PLE_REPLICATE=1 = the full table on each box, no per-step exchange). No CPU offload worker,
+# no IPC detour. Measured against the int3/offload stack, same boxes, same tests, same day: engine steps +8–11 % on
+# every rung (c=1 17.7 vs 16.4; c=32 4.0 vs 3.7), 80 tok/s single-stream peak (76 avg), 533 @ c=32; boss-animals
+# render gauntlet 26/32 vs ~16/32. README.md / reports.md. Public twin of this image: …-cluster-vllm:v3.
 #
 # HOST RULE (root, once, both boxes; cluster/server-profile.sh sets it): vm.compaction_proactiveness=0. Without it a
 # tight serve stalls 4–5 s every ~37 s (kcompactd migrating GPU-mapped pages) — −10 % and a 30 % floor drop.
@@ -20,10 +14,10 @@
 #   ./run.sh qwen38-flash-next-cluster
 
 server:
-  image: mbx-qwen38-flash-next-cluster            # v1 release image + patches 01–03 (Dockerfile; public twin = …-cluster-vllm:v3)
-  cpuset: "5-9,15-19"                             # X925 cores, as the solo champion (A/B'd +2-3%)
-  entrypoint: vllm                                # plain `vllm serve` — the checkpoint is final
-  model: /models/myllmbox/Qwen3.8-Flash-Next-hibrid47   # == hf.co/myllmbox/Qwen3.8-Flash-Next-hibrid47 (NVFP4 table)
+  image: mbx-qwen38-flash-next-cluster
+  cpuset: "5-9,15-19"
+  entrypoint: vllm
+  model: /models/myllmbox/Qwen3.8-Flash-Next-hibrid47
   cache: recipes/qwen38-flash-next-cluster/.data/cache
   min_avail_gb: 100                             # wait for unified memory after a teardown (phantom OOM otherwise)
 
@@ -32,17 +26,16 @@ server:
     TRANSFORMERS_OFFLINE: "1"
     HF_HUB_DISABLE_XET: "1"
     # NO VLLM_PLE_CPU_OFFLOAD / MBX_PLE_MULTINODE: the NVFP4 table is an ordinary GPU parameter (patch 03).
-    # MBX_PLE_REPLICATE: "1"                      # full table per box instead of sharded — pair with kv-cache-memory ≤ 25 G
+    MBX_PLE_REPLICATE: "1"                        # full 28.6 GiB table on each box, no all-reduce — the measured layout.
+                                                  # Unset = half per box (14 GiB freed → kv pin up to 40 G, ~80 seats;
+                                                  # c=1 steps within 1 %) — measure before publishing numbers from it.
     TORCH_CUDA_ARCH_LIST: "12.1a"
     FLASHINFER_CUDA_ARCH_LIST: "12.1a"
     FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
-    VLLM_CACHE_ROOT: /cache/vllm-cache            # persistent compile/autotune cache — TP=2 shapes are new, one-time
-    OMP_NUM_THREADS: "8"                          # matched to the 10-core pin
-    MBX_VOCAB_GEMV: "1"                           # championship-proven (+5.5% steps)
-    VLLM_MARLIN_USE_ATOMIC_ADD: "1"               # Marlin small-N fast path (self-gating)
-    # RoCE NCCL over ConnectX — the runner pins NCCL_SOCKET_IFNAME / NCCL_IB_HCA / GLOO / VLLM_HOST_IP per box
-    # from cluster.yaml and opens /dev/infiniband + IPC_LOCK + memlock (the 2026-09-04 fix). These pin RoCE v2;
-    # identical to the vision lane that PROVED RDMA (port counters moving, 125 MB/s during decode).
+    VLLM_CACHE_ROOT: /cache/vllm-cache
+    OMP_NUM_THREADS: "8"
+    MBX_VOCAB_GEMV: "1"
+    VLLM_MARLIN_USE_ATOMIC_ADD: "1"
     NCCL_IB_GID_INDEX: "3"
     NCCL_IB_ROCE_VERSION_NUM: "2"
     NCCL_IB_ADDR_FAMILY: "AF_INET"
@@ -52,31 +45,26 @@ server:
     NCCL_NVLS_ENABLE: "0"
 
   vllm:
-    served-model-name: Qwen/Qwen3.8-Flash-Next    # same public name as the solo serve
-    pipeline-parallel-size: 1                     # PP unsupported on this model — TP only (TP=2 set by launcher)
-    distributed-executor-backend: mp              # dual-node = mp, no Ray (also the PLE worker spawn rule)
-    gpu-memory-utilization: 0.86                  # With kv-cache-memory pinned this does NOT size the KV pool — it is the
-                                                  # budget vLLM checks weights + activations + the pin against at start.
-                                                  # Table on the GPU: ~50 GiB/box sharded + 40 G KV = 90 > 0.70×119=83
-                                                  # → 0.86 (102 GiB). (0.70 was right when the table lived in the worker.)
-    kv-cache-memory: "40000000000"              # 40 GB/box, sharded table (replicated: 25 G). ≈ 2.4M pooled tokens,
-                                                  # ~80 seats at 1.15 %/request. Leaves ~8 GB host headroom per box —
-                                                  # verify `free -g` after capture on the first boot; 46 G if it shows ≥ 12.
+    served-model-name: Qwen/Qwen3.8-Flash-Next
+    pipeline-parallel-size: 1
+    distributed-executor-backend: mp
+    gpu-memory-utilization: 0.7                   # with kv-cache-memory pinned this does not size the KV pool
+                                                  # (verified 2026-09-06: 65 GiB of weights + the pin boot at 0.70)
+    kv-cache-memory: "28000000000"                # 28 GB/box = 1.71M pooled tokens, ~55 seats at 1.15 %/request.
+                                                  # After capture: ~5 GB available/box, box2 touched swap (3 GB) on the
+                                                  # first boot — 25 G (1.52M tokens, 49 seats) is the no-swap setting.
     max-model-len: 262144
-    async-scheduling: true                        # as the published stack (corruption suspicion disproved by A/B)
-    max-num-seqs: 64                              # KV ≈ 1.15 %/request → ~80 seats at 40 G; 64 is the efficient top
-                                                  # (52 and 64 are the graph buckets; 56/60 pay a 64-sized step)
-    max-num-batched-tokens: 8192                  # as solo (also the image-encoder budget; see solo notes)
-    enable-prefix-caching: true                   # WATCH ITEM: mamba/GDN prefix-cache alignment (Saren) — as solo
+    async-scheduling: true
+    max-num-seqs: 48                              # the graph bucket below the pool's ~55 seats
+    max-num-batched-tokens: 8192
+    enable-prefix-caching: true
     enable-auto-tool-choice: true
     tool-call-parser: qwen3_xml
     reasoning-parser: qwen3
-    speculative-config: '{"method":"mtp","num_speculative_tokens":4}'   # K=4 (2026-09-05): acc 4.2 code / 2.7-3.1 thinking,
-                                                  # ~5% step cost vs K=3, net faster at every c; cap 5.0
-    # KV stays bf16 (vendor QSA guard refuses fp8 on this model — measured on solo, do not re-add)
+    speculative-config: '{"method":"mtp","num_speculative_tokens":4}'
 
-cluster:                                          # TP=2 across both Sparks over the ConnectX link
-  boxes: [box1, box2]                             # names → cluster.yaml; box1 = head (API), box2 joins --headless
+cluster:
+  boxes: [box1, box2]
   master_port: 25000
 
 dashboard: sparkdash

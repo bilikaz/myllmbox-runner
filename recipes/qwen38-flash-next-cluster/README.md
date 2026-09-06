@@ -25,7 +25,7 @@ Boot 2026-09-06 10:46 (fresh reboot). Each row = 3–7 independent runs of stead
 
 | concurrent | engine steps/s (v1 → v2) | tok/s avg (v1 → v2) | **v2 peak** | per stream | acceptance |
 |---|---|---|---|---|---|
-| 1 | 16.4 → **17.7** (17.5–18.1) | 68.4 → 73 (7 runs, 69–76) | **80** | 73 | 4.1 (3.9–4.3) |
+| 1 | 16.4 → **17.7** (17.5–18.1) | 68.4 → 73 | **80** | 73 | 4.1 (3.9–4.3) |
 | 2 | 13.8 → **15.1** | 118.3 → 126 | **133** | 63 | 4.15 |
 | 4 | 10.7 → **11.8** | 184.7 → 198 | **209** | 50 | 4.2 |
 | 8 | 8.0 → **8.8** | 279.8 → 294 | **309** | 37 | 4.16 |
@@ -69,10 +69,14 @@ AVERAGE = (code avg + thinking avg) / 2, range = extremes of either band. Full v
 `reports.md`. Regenerate any lane: `./bench/summary.py --model <folder> --thinking both`.
 
 ## Knobs (v2)
-- `kv-cache-memory` **40 G** with the sharded table (~50 GiB load/box) — ≈ 2.4M pooled tokens, ~80 seats. First boot of
-  this yaml is the sharded measurement: expect 17.7 steps at c=1 and 4.0 at c=32, else flip to `MBX_PLE_REPLICATE: "1"` + 25 G.
-- `gpu-memory-utilization` **0.86**: with the pin set it does not size KV; it is the budget the start-up check
-  measures weights + activations + pin against (0.70 = 83 GiB was right when the table lived in the CPU worker).
+- `MBX_PLE_REPLICATE: "1"` + `kv-cache-memory` **28 G** (1.71M pooled tokens, ~55 seats, `max-num-seqs` 48): the full
+  table on each box, the layout every v2 number was measured on (at 25 G). First boot at 28 G: ~5 GB available per box
+  after capture, box2 touched swap for 3 GB — 25 G is the no-swap setting if that repeats.
+- Unset `MBX_PLE_REPLICATE` for half the table per box: 14 GiB freed → a 40 G pin (~80 seats) at c=1 steps within 1 %
+  of replicated (measured with the compactor on). Not yet measured at c=32 with the compactor off — do that before
+  publishing numbers from it.
+- `gpu-memory-utilization` **0.70**: with the pin set it does not size KV and the start-up check does not apply it
+  to weights + pin (65 GiB + 28 G booted at 0.70).
 - `OMP_NUM_THREADS: "8"` and the X925 cpuset are inherited from the offload era; the CPU gather is gone, so an
   unpinned / 1-thread A/B at c=1 is the cheap follow-up.
 
