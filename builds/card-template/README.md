@@ -18,3 +18,9 @@ from the LADDER array — set per-rung values, pending:true renders hollow), har
 House rules that shaped it (builds/instructions.md applies): numbers measured with conditions,
 one green number per card, no internal names, chart points only from reproducible configs,
 vendor casing for model names, ×1 badge = quantity (bottom of photo), no footer clutter.
+
+## Also in this folder
+- `benchmark-banner.py` — the earlier pure-PIL stat card (deterministic typography; the HTML template above replaced
+  it for releases, kept as the no-browser fallback). `announcement-art.md` — its usage plus the illustrated-poster
+  workflow on the qwen-image-edit serve ("the model paints, the code types").
+

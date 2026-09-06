@@ -2,10 +2,10 @@
 """Benchmark-card banner generator (myllmbox house style, Spark-Arena-inspired layout).
 
 Pure PIL — deterministic typography, exact numbers, no diffusion-model spelling lottery.
-Every number on a banner must be MEASURED (clean decode windows); see scripts/README.md.
+Every number on a banner must be MEASURED (clean decode windows); see announcement-art.md (this folder).
 
 Usage (defaults reproduce the Qwen3.8-Flash-Next banner):
-  python3 scripts/benchmark-banner.py \
+  python3 builds/card-template/benchmark-banner.py \
     --org Qwen --title QWEN3.8-FLASH-NEXT \
     --chip vLLM --chip "hibrid45 · NVFP4+bf16 attn" --chip "1 node" \
     --stat "55:tok/s:DECODE · CODE C1:green" \

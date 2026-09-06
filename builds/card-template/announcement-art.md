@@ -1,4 +1,4 @@
-# scripts/ — post & announcement art
+# Announcement art — banner + poster workflow (moved from scripts/ on 2026-09-06)
 
 Two asset types per model announcement, made two different ways. The rule that makes both work:
 
@@ -12,7 +12,7 @@ Two asset types per model announcement, made two different ways. The rule that m
 Spark-Arena-style dark stat card in the house palette. Fully deterministic, run anywhere with PIL:
 
 ```bash
-python3 scripts/benchmark-banner.py \
+python3 builds/card-template/benchmark-banner.py \
   --org Qwen --title QWEN3.8-FLASH-NEXT \
   --chip vLLM --chip "hibrid45 · NVFP4+bf16 attn" --chip "1 node" \
   --stat "55:tok/s:DECODE · CODE C1:green" \
@@ -47,7 +47,7 @@ curl -s -X POST http://127.0.0.1:8000/v1/images/edits \
 #   e.g. "Remove the large headline text completely, keep everything else exactly the same."
 
 # step 3 — typeset the exact copy in code (PIL over the clean plate):
-#   headline + stat chips — see the inline PIL block pattern in benchmark-banner.py
+#   headline + stat chips — see the inline PIL block pattern in benchmark-banner.py (this folder)
 #   (fonts: DejaVuSans-Bold; house colors in that script's constants)
 ```
 
