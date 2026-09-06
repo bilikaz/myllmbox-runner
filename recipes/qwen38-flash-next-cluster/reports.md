@@ -133,6 +133,9 @@ log). Summary of what moved into this recipe:
 | 16 | 4 | 415 · 421 · 417 · 415 | 451 | 6.2 | 4.17–4.21 |
 | 24 | 3 | 488 · 489 · 486 | 514 | 4.8–4.9 | 4.17–4.19 |
 | 32 | 3 | 531 · 535 · 534 | 561 | 4.0 | 4.18–4.21 |
+| 48 | 1 (28 G boot, 19:52, 400 s) | 635 (599–674) | 674 | 3.1–3.3 | 4.18 (4.02–4.39); P(pos) 0.90/0.83/0.76/0.69 |
+c=48: pool 86 % at first full batch → 98.9 % at 420 s; the 660 → 620 slide over the hold is acceptance (4.3 → 4.0), steps flat.
+box2 swap-ins over the c=1 ×4 + c=48 holds on the 28 G boot: 320566 → 320589 pages (untouched leftovers).
 Fish, c=32, 7 runs across two boots of the same config: 521 · 519 · ~510 · 517 (morning) · 512 · 513 · 509 (afternoon,
 not rebooted, 2 GB swap) → 517 / 511; steps 4.0–4.1; acc 3.97–4.04; steady peak 579. Boot state is worth ~1 %.
 Thinking, c=32 (visual client, boss-animals): 321.6 tok/s, steps 4.01, acc 2.51, P(pos) 0.64/0.42/0.27/0.18.
@@ -144,7 +147,7 @@ Thinking, c=32 (visual client, boss-animals): 321.6 tok/s, steps 4.01, acc 2.51,
 26 good/super · 3 partial · 3 broken (int3 ≈ 16/16). Host over 3.5 h: swap-ins ≈ 15 MB, kcompactd 0 ticks.
 
 ## Open
-- Sharded table at kv 40 G with the compactor off = THIS yaml's first boot. Expect 17.6–17.7 / 4.0; then rungs 40–64.
+- Sharded table at kv 40 G with the compactor off — unmeasured (the yaml went replicated/28 G instead). c=40 rung unmeasured.
 - Worker host RSS 8 GiB: 3.4 GiB glibc heap retained from load (malloc_trim candidate for the next image), 2.7 GiB
   vLLM shm ring, 1.25 GiB anon.
 - Fresh-reboot ladder on the winning layout, both bands → kit v2 README table.

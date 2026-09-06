@@ -50,12 +50,12 @@ server:
     distributed-executor-backend: mp
     gpu-memory-utilization: 0.7                   # with kv-cache-memory pinned this does not size the KV pool
                                                   # (verified 2026-09-06: 65 GiB of weights + the pin boot at 0.70)
-    kv-cache-memory: "28000000000"                # 28 GB/box = 1.71M pooled tokens, ~55 seats at 1.15 %/request.
+    kv-cache-memory: "28000000000"                # 28 GB/box = 1.71M pooled tokens; 48 streams fill it over a 400 s hold.
                                                   # After capture: ~5 GB available/box, box2 touched swap (3 GB) on the
                                                   # first boot — 25 G (1.52M tokens, 49 seats) is the no-swap setting.
     max-model-len: 262144
     async-scheduling: true
-    max-num-seqs: 48                              # the graph bucket below the pool's ~55 seats
+    max-num-seqs: 48                              # the seat ceiling: 48 streams reach 98.9 % of the pool in 400 s
     max-num-batched-tokens: 8192
     enable-prefix-caching: true
     enable-auto-tool-choice: true

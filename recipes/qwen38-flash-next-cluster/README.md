@@ -20,7 +20,7 @@ inside the model's forward pass. No CPU offload worker, no per-step IPC detour. 
    (`./bench/accept.py --since <HH:MM> --host <box1>` gives the per-position picture).
 4. Gauntlet before quoting numbers: `tests/pasture.html` + `tests/fish.html`, best of 3, user-generated.
 
-## Measured — v2 (hibrid47, replicated table, kv 25 G, K=4, `vm.compaction_proactiveness=0`, pasture, thinking off)
+## Measured — v2 (hibrid47, replicated table, kv 25 G · c=48 on the 28 G boot, K=4, `vm.compaction_proactiveness=0`, pasture, thinking off)
 Boot 2026-09-06 10:46 (fresh reboot). Each row = 3–7 independent runs of steady 10 s windows; peak = best steady window.
 
 | concurrent | engine steps/s (v1 → v2) | tok/s avg (v1 → v2) | **v2 peak** | per stream | acceptance |
@@ -32,11 +32,13 @@ Boot 2026-09-06 10:46 (fresh reboot). Each row = 3–7 independent runs of stead
 | 16 | 5.8 → **6.2** | 395.7 → 417 | **451** | 26 | 4.2 |
 | 24 | 4.4 → **4.9** | 450.2 → 488 | **514** | 20 | 4.18 |
 | 32 | 3.7 → **4.0** | 501.7 → 533 | **579** | 17 | 4.19 |
+| 48 | 3.0 → **3.2** | 493 → 635 | **674** | 13.2 | 4.18 |
 
 Steps +7–11 % on every rung; the old averages are the new floors. Fish prompt at c=32: 517 avg over 7 runs
 (acceptance 4.0). Thinking at c=32: 320–340 tok/s at acceptance 2.5 — same steps, the text decides the rest.
 Per-position acceptance on pasture, c=1: P(draft 1..4 accepted) = 0.91 / 0.85 / 0.80 / 0.71.
-Rungs ≥ 40 need the sharded table (this yaml): the replicated boot seats 49 at 25 G.
+c=48 (this yaml: replicated, 28 G, 19:52, 400 s hold): steps flat 3.1–3.3 over 38 bins, no dip; the pool stood at
+98.9 % when the hold ended — 48 is the seat ceiling of the 28 G pin, not a graph bucket below it.
 
 **Quality (the deciding result).** 32 boss-animals renders at c=32, thinking on, user's visual gauntlet:
 **26 good/super · 3 partial · 3 broken.** The int3 table (v1) scored about half/half on the same scenes.
@@ -69,9 +71,10 @@ AVERAGE = (code avg + thinking avg) / 2, range = extremes of either band. Full v
 `reports.md`. Regenerate any lane: `./bench/summary.py --model <folder> --thinking both`.
 
 ## Knobs (v2)
-- `MBX_PLE_REPLICATE: "1"` + `kv-cache-memory` **28 G** (1.71M pooled tokens, ~55 seats, `max-num-seqs` 48): the full
-  table on each box, the layout every v2 number was measured on (at 25 G). First boot at 28 G: ~5 GB available per box
-  after capture, box2 touched swap for 3 GB — 25 G is the no-swap setting if that repeats.
+- `MBX_PLE_REPLICATE: "1"` + `kv-cache-memory` **28 G** (1.71M pooled tokens, 48 seats fill it, `max-num-seqs` 48): the full
+  table on each box, the layout every v2 number was measured on (rungs 1–32 at 25 G, c=48 at 28 G). First boot at 28 G:
+  ~5 GB available per box after capture, box2 holds 3 GB in swap — but swap-ins stayed flat through the c=1 and c=48
+  holds (load leftovers, never touched). 25 G is the fallback if swap-ins ever climb.
 - Unset `MBX_PLE_REPLICATE` for half the table per box: 14 GiB freed → a 40 G pin (~80 seats) at c=1 steps within 1 %
   of replicated (measured with the compactor on). Not yet measured at c=32 with the compactor off — do that before
   publishing numbers from it.
