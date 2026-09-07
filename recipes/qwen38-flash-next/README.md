@@ -29,12 +29,12 @@ things make it fit where a resident table OOMed:
 ## Measured — v2 (K=3, pasture, `vm.compaction_proactiveness=0`, boot 10 of 2026-09-07, fp8 KV)
 | | v1 (int3 table, offload worker, kv 18 G bf16) | **v2** |
 |---|---|---|
-| c=1 sustained, thinking off | 44 tok/s | **50–51** (12 runs: 49.0–51.1 avg) |
+| c=1 sustained, thinking off | 44 tok/s | **50–51** |
 | c=1 peak window | 55 @ acceptance 4.0 | 54.6 |
-| engine steps/s c=1 | ~13.75 | **14.4** (14.1–14.5, ±1 %) |
-| c=4 | 103 avg | **129** avg (123–133), 133 peak, 9.3 steps/s, acc 3.47 (fp8 KV boot); bf16 boot 9: 124 / 8.9 |
-| c=8 (all seats) | 148–158 | **182** avg (158–193, 21 windows), 193 peak, 6.6 steps/s, acc 3.42; kv 94 → 99.3 %, no preemption |
-| c=1 thinking on, full 30k-token request | — | 42 avg (39 thinking → 51 code), same 14.4 steps, 4 runs 39–42 |
+| engine steps/s c=1 | ~13.75 | **14.4** |
+| c=4 | 103 avg | **129** avg, 133 peak, 9.3 steps/s, acc 3.47 |
+| c=8 (all seats) | 148–158 | **182** avg, 193 peak, 6.6 steps/s, acc 3.42; kv 99 % |
+| c=1 thinking on, full 30k-token request | — | 39–42 avg (39 thinking → 51 code), same 14.4 steps |
 | KV pool | 579,550 tok bf16 @ 18 G | **391,943 tok fp8 @ 7 G** (1.50× a 262k request) |
 | weights at boot | 91 G (table in the worker) | 73.3 GiB GPU + 26.9 GiB table in page cache |
 | NVMe while decoding | — | 0.4 reads/s with the table resident |
@@ -53,7 +53,8 @@ the mappings (kill 2 MB readahead folios → no compaction storms during populat
 ## Tuning
 - **`kv-cache-memory`** 7 G fp8. Bigger pin = fewer table pages resident (they are the same memory); measured free after
   populate ≈ 4–15 GB depending on the pass. `kv-cache-dtype: fp8` → drop the line for bf16 (217,808 tokens).
-- **`max-num-seqs`** 8: ~1 GB of pool per running request is GDN state regardless of length.
+- **`max-num-seqs`** 8: ~12 % of the pool per running request is GDN state regardless of length — 8 seats leave ~3k tokens
+  of context each (the c=8 rung is short requests), 4 leave ~50k, 1–2 the full 262k.
 - **`MBX_PLE_MMAP_PREWARM`**: `auto` (populate after the flip), `0` (hot set only, table fills on demand), `<seconds>`.
 - **`speculative-config`** K=3 (K=4 not yet A/B'd on the solo).
 - No `dashboard:` — the memory is the constraint.

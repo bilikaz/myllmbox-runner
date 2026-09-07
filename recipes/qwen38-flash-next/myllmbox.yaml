@@ -57,7 +57,7 @@ server:
     kv-cache-dtype: fp8                         # patch 06 (PR #54846 port): fp8_e4m3 main KV on the QSA path; GDN state stays bf16
     max-model-len: 262144                       # native max; one 262k request = ~4.8 GiB fp8 (7.57 bf16 did not fit an 8 GB pin)
     async-scheduling: true
-    max-num-seqs: 8                             # ~1 GB of pool each — 8 seats ≈ the pool in state; 4 leaves ~130k tokens of context
+    max-num-seqs: 8                             # ~12 % of the pool each (GDN state) — 8 seats = ~3k tokens of context each, 4 = ~50k, 1-2 = 262k
     max-num-batched-tokens: 8192                # also the image encoder budget: one max-res image ~4.1k tokens
     enable-prefix-caching: true
     enable-auto-tool-choice: true
