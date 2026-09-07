@@ -31,13 +31,12 @@ things make it fit where a resident table OOMed:
 |---|---|---|
 | c=1 sustained, thinking off | 44 tok/s | **50–51** |
 | c=1 peak window | 55 @ acceptance 4.0 | 54.6 |
-| engine steps/s c=1 | ~13.75 | **14.4** |
-| c=4 | 103 avg | **129** avg, 133 peak, 9.3 steps/s, acc 3.47 |
-| c=8 (all seats) | 148–158 | **182** avg, 193 peak, 6.6 steps/s, acc 3.42; kv 99 % |
-| c=1 thinking on, full 30k-token request | — | 39–42 avg (39 thinking → 51 code), same 14.4 steps |
+| engine steps/s c=1 | ~13.75 | **14.4** (14.1–14.5, ±1 %) |
+| c=4 | 103 avg | **129** avg (123–133), 133 peak |
+| c=8 (all seats) | 148–158 | **182** avg (158–193), 193 peak |
+| c=1 thinking on, full 32k-token request | — | 42 avg (39 thinking → 51 code), same 14.4 steps |
 | KV pool | 579,550 tok bf16 @ 18 G | **391,943 tok fp8 @ 7 G** (1.50× a 262k request) |
 | weights at boot | 91 G (table in the worker) | 73.3 GiB GPU + 26.9 GiB table in page cache |
-| NVMe while decoding | — | 0.4 reads/s with the table resident |
 
 The step is ~70 ms either way on one GPU (it reads all the dense bytes; the cluster's 56 ms halves them). The gain
 over v1 is the table path (no IPC detour) and the NVFP4 table's quality (cluster gauntlet 26/32 vs ~16/32 for int3).
@@ -57,7 +56,6 @@ the mappings (kill 2 MB readahead folios → no compaction storms during populat
   of context each (the c=8 rung is short requests), 4 leave ~50k, 1–2 the full 262k.
 - **`MBX_PLE_MMAP_PREWARM`**: `auto` (populate after the flip), `0` (hot set only, table fills on demand), `<seconds>`.
 - **`speculative-config`** K=3 (K=4 not yet A/B'd on the solo).
-- No `dashboard:` — the memory is the constraint.
 
 ## v1
 hibrid46 + in-checkpoint int3 table, `myllmbox/qwen38-flash-next-vllm:v1`, `VLLM_PLE_CPU_OFFLOAD=1`, kv 18 G: the
