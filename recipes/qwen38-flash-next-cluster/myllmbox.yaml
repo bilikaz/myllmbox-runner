@@ -65,8 +65,9 @@ server:
 
 cluster:
   boxes: [box1, box2]
-  ib_links: 1                                 # RDMA devices per box (1|2). 2 = both PCIe halves of the CX7, THE STATE UNDER TEST
-                                              # 2026-09-07: c=1 17.4 vs 17.7 steps/s (−2 %), c=32 pending. 1 = the v2 numbers.
+  ib_links: 1                                 # RDMA devices per box (1|2). 2 = NCCL striped over both PCIe halves of the CX7 —
+                                              # A/B 2026-09-07: c=1 17.5 vs 17.7 steps/s, c=32 3.8–3.9 vs 4.0 (link use 0.74 GB/s of
+                                              # 12.8 per half: bandwidth was never the limit; the per-QP overhead is). Keep 1 here.
   master_port: 25000
 
 dashboard: sparkdash

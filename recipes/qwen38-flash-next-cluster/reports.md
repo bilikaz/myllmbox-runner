@@ -151,3 +151,15 @@ Thinking, c=32 (visual client, boss-animals): 321.6 tok/s, steps 4.01, acc 2.51,
 - Worker host RSS 8 GiB: 3.4 GiB glibc heap retained from load (malloc_trim candidate for the next image), 2.7 GiB
   vLLM shm ring, 1.25 GiB anon.
 - Fresh-reboot ladder on the winning layout, both bands → kit v2 README table.
+
+## Both PCIe halves of the CX7 (`cluster.ib_links: 2`) — A/B 2026-09-07 evening, same boot day, K=4, pasture, thinking off
+Setup: second netdev (enP2p1s0f1np1) given a link-local IPv4 on both boxes (cluster/setup.sh), NCCL_IB_HCA=rocep1s0f1,roceP2p1s0f1
++ NCCL_IB_QPS_PER_CONNECTION=4 + NCCL_IB_SPLIT_DATA_ON_QPS=1 + NCCL_CROSS_NIC=1. Raw path: ib_write_bw 102 Gb/s per half
+(PCIe Gen5 x4 cap), 109 Gb/s half2↔half2 and cross. Boot 1 hung 25 min in ProcessGroupGloo (GLOO_SOCKET_IFNAME list on box1
+only) → runner fix; boot 2 healthy 712 s, graphs 2.41/1.65 GiB (vs 1.88/1.03 single).
+| c | one half (16:49 boot, 4 runs) | both halves (21:58 boot) | link while decoding |
+|---|---|---|---|
+| 1 | 17.5–17.7 steps/s · 74–76 avg · 82 peak | 17.4–17.6 (6 runs) · 72–75 · 80 | 138 MB/s → 79+69 MB/s |
+| 32 | 4.0 steps/s · 533 avg · 579 peak | 3.8–3.9 · 506–526 | ~0.7 GB/s → 369+367 MB/s (5.7 % of one half) |
+Verdict: striping works, bandwidth was never the limit (<6 % of one half at c=32); the per-QP overhead costs 1–5 %. Recipe stays
+`ib_links: 1`; 2 remains available for models whose collectives can fill ~13 GB/s (Khen's DS-V4 +14 % at QPS=4 is that case).

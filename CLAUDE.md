@@ -91,8 +91,9 @@ addresses in `cluster.yaml`.
   = head (this box, runs the API), the rest join `--headless`. TP = box count is set automatically.
 - **`cluster.ib_links: 1|2`** — how many RDMA devices per box NCCL uses. A Spark's ConnectX-7 is TWO PCIe Gen5 x4 halves
   (rocep1s0f1 + roceP2p1s0f1, ~13 GB/s each); `cluster/setup.sh` lists both in `cluster.yaml` (the second needs an IPv4,
-  setup adds it with consent). Default 1. 2 = NCCL striped over both (+QPS envs) — measured −2 % steps at c=1 on Qwen3.8
-  (tiny collectives), only worth it for wide-hidden models / big batches; the runner pre-flight validates whatever is used.
+  setup adds it with consent). Default 1. 2 = NCCL striped over both (+QPS envs) — measured on Qwen3.8: −1 % steps at c=1, −3–5 % at
+  c=32 with the link <6 % busy (per-QP overhead), so only for models whose collectives can fill ~13 GB/s; the runner
+  pre-flight validates whatever is used. Both ranks' GLOO_SOCKET_IFNAME must be ONE iface (an asymmetric list hangs init).
 - **The repos on the boxes are SEPARATE copies** (not a shared mount). Files you write via the editor land on the
   head only. That's why `build-and-copy` ships the *image* to workers and `run.sh` rsyncs the *weights* — workers
   only need the image + the weights at the right path, never the recipe folder.
