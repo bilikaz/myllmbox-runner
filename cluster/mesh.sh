@@ -77,12 +77,13 @@ echo "== recommended recipe order (rank 0 = head, then along the links) =="
 echo "    cluster: {boxes: [$(echo "$order" | xargs | tr ' ' ',' | sed 's/,/, /g')]}"
 
 # write discovered links (comma-list of ifaces) + primary interconnect IP per box into cluster.yaml
-{ for a in $BOXES; do echo "$a|${IFLIST[$a]:-}|${PRIMARY[$a]:-}"; done; } | "$(_py)" - cluster.yaml <<'PY'
-import sys, yaml
+# data via an env var: a pipe into `python - <<heredoc` is swallowed by the heredoc (this write was a silent no-op until 2026-09-07)
+MBX_MESH="$(for a in $BOXES; do echo "$a|${IFLIST[$a]:-}|${PRIMARY[$a]:-}"; done)" "$(_py)" - cluster.yaml <<'PY'
+import os, sys, yaml
 path = sys.argv[1]
 d = yaml.safe_load(open(path)) or {}
 boxes = d.get("boxes") or {}
-for line in sys.stdin:
+for line in os.environ.get("MBX_MESH", "").splitlines():
     name, ifl, prim = (line.rstrip("\n").split("|", 2) + ["", ""])[:3]
     b = boxes.get(name)
     if not b:

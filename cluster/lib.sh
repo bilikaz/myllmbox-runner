@@ -91,7 +91,7 @@ nm_linklocal() {  # <box> <netdev>
   local box="$1" nd="$2"
   local inner="con=\$(nmcli -t -f NAME,DEVICE con show | grep ':$nd\$' | cut -d: -f1 | head -1);
 if [ -z \"\$con\" ]; then con=myllmbox-$nd; nmcli con add type ethernet ifname $nd con-name \"\$con\" >/dev/null; fi;
-nmcli con mod \"\$con\" ipv4.method link-local ipv6.method disabled connection.autoconnect yes && nmcli con up \"\$con\" >/dev/null && ip -4 -o addr show $nd | awk '{print \"  ✓ '$nd' \" \$4}'"
+nmcli con mod \"\$con\" ipv4.method link-local ipv6.method disabled connection.autoconnect yes && nmcli con up \"\$con\" >/dev/null && echo \"  ✓ $nd \$(ip -4 -br addr show $nd | tr -s ' ' | cut -d' ' -f3)\""
   if is_local "$(box_host "$box")"; then sudo bash -c "$inner"
   else ssh -t "$(box_target "$box")" "sudo bash -c '$inner'"; fi
 }
@@ -118,10 +118,12 @@ mesh_rdma_halves() {
   done
   [ "$any" = 1 ] || { echo "  (no RDMA devices in cluster.yaml)"; return 0; }
   if [ "$missing" = 0 ]; then
-    printf '%s' "$pairs" | "$(_py)" - cluster.yaml <<'PY'
-import sys, yaml
+    # data via an env var — a pipe into `python - <<heredoc` is silently swallowed by the heredoc (the bug that made
+    # this step and mesh.sh print success while writing nothing, 2026-09-07)
+    MBX_PAIRS="$pairs" "$(_py)" - cluster.yaml <<'PY'
+import os, sys, yaml
 path = sys.argv[1]; d = yaml.safe_load(open(path)) or {}; boxes = d.get("boxes") or {}
-for line in sys.stdin:
+for line in os.environ.get("MBX_PAIRS", "").splitlines():
     if not line.strip(): continue
     name, a, b = line.rstrip("\n").split("|")
     if name in boxes: boxes[name]["ib_hca"] = [a, b]
