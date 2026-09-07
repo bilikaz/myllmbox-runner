@@ -33,6 +33,7 @@ things make it fit where a resident table OOMed:
 | c=1 peak window | 55 @ acceptance 4.0 | 54.6 |
 | engine steps/s c=1 | ~13.75 | **14.4** (14.1–14.5, ±1 %) |
 | c=4 | 103 avg | **129** avg (123–133), 133 peak, 9.3 steps/s, acc 3.47 (fp8 KV boot); bf16 boot 9: 124 / 8.9 |
+| c=8 (all seats) | 148–158 | **182** avg (158–193, 21 windows), 193 peak, 6.6 steps/s, acc 3.42; kv 94 → 99.3 %, no preemption |
 | c=1 thinking on, full 30k-token request | — | 42 avg (39 thinking → 51 code), same 14.4 steps, 4 runs 39–42 |
 | KV pool | 579,550 tok bf16 @ 18 G | **391,943 tok fp8 @ 7 G** (1.50× a 262k request) |
 | weights at boot | 91 G (table in the worker) | 73.3 GiB GPU + 26.9 GiB table in page cache |
