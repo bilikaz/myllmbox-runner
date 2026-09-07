@@ -13,7 +13,8 @@
 #   iface        that interconnect's interface name → NCCL_SOCKET_IFNAME / GLOO_SOCKET_IFNAME
 #   ib_hca       optional RDMA HCA (ConnectX/InfiniBand only) → NCCL_IB_HCA. Omit on plain ethernet.
 #                A LIST names several devices (DGX Spark: [rocep1s0f1, roceP2p1s0f1] = the two PCIe halves of its
-#                ConnectX-7, ~13 GB/s each; the runner then stripes NCCL over both — the second netdev needs an IP too).
+#                ConnectX-7, ~13 GB/s each — cluster/setup.sh writes both). How MANY a serve uses is the recipe's call:
+#                `cluster.ib_links: 1|2` in the recipe (default 1; 2 stripes NCCL over both halves).
 #   ssh_user     login user (all boxes should use the same user + repo path so the model's absolute path matches)
 
 boxes:

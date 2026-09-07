@@ -65,6 +65,8 @@ server:
 
 cluster:
   boxes: [box1, box2]
+  ib_links: 1                                 # RDMA devices per box (1|2). 2 = both PCIe halves of the CX7, THE STATE UNDER TEST
+                                              # 2026-09-07: c=1 17.4 vs 17.7 steps/s (−2 %), c=32 pending. 1 = the v2 numbers.
   master_port: 25000
 
 dashboard: sparkdash

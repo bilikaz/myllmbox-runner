@@ -157,6 +157,12 @@ def _resolve_cluster(cfg: dict[str, Any], base_dir: str | Path = ".") -> None:
         # ib_hca: one device, or a LIST (the Spark's ConnectX-7 hangs off two PCIe Gen5 x4 links — rocep1s0f1 and
         # roceP2p1s0f1 — each ~13 GB/s; naming both lets NCCL stripe over both halves, ~20 GB/s). Joined for NCCL_IB_HCA.
         c["ib_hcas"]   = [",".join(h) if isinstance(h, list) else (h or "") for h in (b.get("ib_hca") for b in rs)]
+        # cluster.ib_links (recipe knob, default 1): how many of a box's RDMA devices to use. cluster.yaml lists what the
+        # hardware HAS (setup writes both halves of a Spark's CX7); the recipe decides what the model WANTS. Measured on
+        # Qwen3.8 TP=2, 2026-09-07: 2 links = +7 % raw bandwidth but −2 % steps at c=1 (tiny collectives pay per-QP
+        # overhead) and +0.5 GB NCCL buffers per box — so 1 unless the model's collectives are big enough to gain.
+        n = int(c.get("ib_links") or 1)
+        c["ib_hcas"]   = [",".join(h.split(",")[:n]) for h in c["ib_hcas"]]
     else:
         n = len(c.get("nodes") or [])
         c["ssh_hosts"] = list(c.get("nodes") or [])                         # legacy ssh'd over the interconnect IP
