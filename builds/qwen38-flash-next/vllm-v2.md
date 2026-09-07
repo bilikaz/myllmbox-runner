@@ -1,8 +1,8 @@
 # docker.io/myllmbox/qwen38-flash-next-vllm:v2
 
-**Published:** pending push (built 2026-09-07 13:24 on ai1 as `mbx-qwen38-flash-next-solo-test`, image id
+**Published:** 2026-09-07 (pushed from ai1; base layers already on the Hub, only the patch layer uploaded; built 13:24 on ai1 as `mbx-qwen38-flash-next-solo-test`, image id
 `sha256:d2d370a5786db47ddf49d6857be3f6e151609cc6385c37c950270f19e70194f2`; served boot 10 the same day).
-**Digest:** `__DIGEST__` (fill after `docker push`).
+**Digest:** `sha256:b2f35cd81998f4d58ef4266792282f48309e0d1bbe19f4816dc2f98684e0a3ec`
 **Reason for a new tag:** the single-Spark kit moves to the hibrid47 checkpoint. v1's int3-in-worker path stays published.
 
 ## What it is
