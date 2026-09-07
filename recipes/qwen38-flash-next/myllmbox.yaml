@@ -8,7 +8,7 @@
 #             myllmbox/qwen38-flash-next-vllm:v2 (builds/qwen38-flash-next/solo/, ledger vllm-v2.md; digest sha256:b2f35cd81998…)
 # v1 (hibrid46 + in-checkpoint int3 table in the CPU offload worker, kv 18 G bf16, 44 tok/s sustained) = git history
 # of this file up to 2026-09-06 and the kit's tag v1. v2 measured c=1: 50–51 tok/s sustained, 54.6 peak, 14.4 steps/s
-# flat; c=4: 124 avg / 137 peak. Thinking on, one 30k-token request: 42 avg (39 thinking, 51 code), same 14.4 steps.
+# flat; c=4: 129 avg / 133 peak, 9.3 steps/s. Thinking on, one 30k-token request: 42 avg (39 thinking, 51 code), same 14.4 steps.
 #
 # Memory on the box (119.7 GiB): GPU process 85 GB (73.3 weights + 7 pool + graphs) + table page cache 27 GB + host
 # heaps 7 GB. The kernel keeps ~6–8 GB FREE but fragmented; a full populate parks ~6 GB of cold heaps in swap once

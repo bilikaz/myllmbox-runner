@@ -56,6 +56,8 @@ tests pass on the GB10 (fp8 vs dequantized reference, tile profiles, nvfp4 layou
 - c=1 pasture thinking on (14:05–15:12, 4 full runs, 30k tokens each, 12–14 min): 42.3 / 39.2 / 39.9 / 39.1 avg,
   peaks 52–56, steps 14.34–14.42; the 14:05 run (71 windows) = experiments/data/qwen38-solo-hibrid47-card.{html,png}:
   thinking phase 39 avg (acc 2.5), code phase 51 avg (acc 3.5–3.9), steps flat 14.0–14.6.
+- c=4 pasture thinking off (17:03, 130 s steady, 13 samples): 128.7 avg (123.2–133.2), per-stream 32.2, steps 9.3 (9.0–9.6,
+  108 ms/step), acc 3.47, P(pos) 0.91/0.82/0.74, kv 48 % with 4 running (~12 % of the pool per request = the GDN floor).
 - earlier the same day (boot 9, bf16 KV): c=1 warm runs 48.4–51.1 avg / 52.5–54.6 peak, steps 13.9–14.5;
   c=4 124.0 avg (103–137), steps 8.86.
 
