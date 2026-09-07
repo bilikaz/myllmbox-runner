@@ -82,10 +82,14 @@ def run_args(cfg: dict[str, Any], node_rank: int = 0, nnodes: int = 1, master_ad
         ifaces, hcas = c.get("ifaces") or [], c.get("ib_hcas") or []       # per-node (config._resolve_cluster)
         iface = ifaces[node_rank] if node_rank < len(ifaces) else c.get("nccl_ifname")   # legacy fallback
         hca = hcas[node_rank] if node_rank < len(hcas) else c.get("nccl_ib_hca")
+        # cluster.yaml iface may be a comma list (mesh.sh records every link that reaches the peers). NCCL accepts a
+        # list for its bootstrap sockets; gloo does NOT tolerate an asymmetric list — both ranks stuck in
+        # init_world_group → ProcessGroupGloo for 25 min on 2026-09-07 when box1 had two ifaces and box2 one. One iface.
+        gloo_iface = str(iface or "").split(",")[0]
         for k, val in (("NCCL_SOCKET_IFNAME", iface),
                        ("NCCL_IB_HCA", hca),
                        ("NCCL_IB_DISABLE", "0"),
-                       ("GLOO_SOCKET_IFNAME", iface),                 # gloo on the same interconnect iface as NCCL
+                       ("GLOO_SOCKET_IFNAME", gloo_iface),            # gloo on ONE interconnect iface (the primary)
                        ("VLLM_HOST_IP", node_ip),                     # advertise THIS node's interconnect IP for the mq
                        ("SGLANG_HOST_IP", node_ip),                   # sglang's equivalent (utils/network.py get_ip) — without it the
                                                                       # shm_broadcast mq advertises the default-route (management-LAN)
