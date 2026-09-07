@@ -169,7 +169,7 @@ wizard_add_box() {  # <default-name>
   # AUTO-DISCOVER the interconnect: candidates = every iface EXCEPT the mgmt one (the IP we ssh'd in on).
   # 0 candidates → single-LAN (interconnect IS the mgmt iface).  1 → use it, no questions (Spark/switch).
   # 2+ → a real ring/mesh (multiple interconnect NICs): only then ask (topology auto-map is a future step).
-  local cand=() k idx
+  local cand=() k idx sibs allsib
   for k in "${!names[@]}"; do [ "${ips[$k]}" != "$host" ] && cand+=("$k"); done
   if [ "${#cand[@]}" -eq 0 ]; then
     for k in "${!names[@]}"; do [ "${ips[$k]}" = "$host" ] && idx=$k; done
@@ -177,6 +177,11 @@ wizard_add_box() {  # <default-name>
   elif [ "${#cand[@]}" -eq 1 ]; then
     idx="${cand[0]}"
     echo "  auto-detected interconnect: ${names[$idx]} ${ips[$idx]}$([ "${hcas[$idx]}" != - ] && echo " (RDMA ${hcas[$idx]})")" >&2
+  elif sibs="$([ "${hcas[${cand[0]}]}" != - ] && hca_siblings "$tgt" "${hcas[${cand[0]}]}" | awk '{print $2}')" && [ -n "$sibs" ] &&
+       { allsib=1; for k in "${cand[@]:1}"; do echo "$sibs" | grep -qx "${hcas[$k]}" || allsib=0; done; [ "$allsib" = 1 ]; }; then
+    # the PCIe halves of ONE card show up as several links — they are one link. Take the first; the pair lands in ib_hca.
+    idx="${cand[0]}"
+    echo "  auto-detected interconnect: ${names[$idx]} ${ips[$idx]} (RDMA ${hcas[$idx]}; ${#cand[@]} PCIe halves of one card)" >&2
   else
     echo "  multiple interconnect links (ring/mesh) — pick the one to use:" >&2
     for k in "${cand[@]}"; do
