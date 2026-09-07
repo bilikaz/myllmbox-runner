@@ -154,7 +154,9 @@ def _resolve_cluster(cfg: dict[str, Any], base_dir: str | Path = ".") -> None:
         c["ssh_hosts"] = [b["host"] for b in rs]                            # control plane (ssh)
         c["ssh_users"] = [b.get("ssh_user") or "" for b in rs]
         c["ifaces"]    = [b.get("iface") or "" for b in rs]
-        c["ib_hcas"]   = [b.get("ib_hca") or "" for b in rs]
+        # ib_hca: one device, or a LIST (the Spark's ConnectX-7 hangs off two PCIe Gen5 x4 links — rocep1s0f1 and
+        # roceP2p1s0f1 — each ~13 GB/s; naming both lets NCCL stripe over both halves, ~20 GB/s). Joined for NCCL_IB_HCA.
+        c["ib_hcas"]   = [",".join(h) if isinstance(h, list) else (h or "") for h in (b.get("ib_hca") for b in rs)]
     else:
         n = len(c.get("nodes") or [])
         c["ssh_hosts"] = list(c.get("nodes") or [])                         # legacy ssh'd over the interconnect IP

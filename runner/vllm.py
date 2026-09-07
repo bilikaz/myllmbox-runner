@@ -99,6 +99,13 @@ def run_args(cfg: dict[str, Any], node_rank: int = 0, nnodes: int = 1, master_ad
                        ("MBX_MASTER_PORT", str(c.get("master_port", 25000)))):
             if val:
                 args += ["-e", f"{k}={val}"]
+        if hca and "," in str(hca):
+            # two HCAs = the two PCIe halves of one ConnectX-7 (see config._resolve_cluster). NCCL only spreads a
+            # connection over both when each connection has several queue pairs and the data is split across them;
+            # CROSS_NIC lets rank pairs use different NICs. A recipe's own env wins (docker takes the last -e).
+            for k, val in (("NCCL_IB_QPS_PER_CONNECTION", "4"), ("NCCL_IB_SPLIT_DATA_ON_QPS", "1"), ("NCCL_CROSS_NIC", "1")):
+                if k not in (v.get("env") or {}):
+                    args += ["-e", f"{k}={val}"]
     if str(v["model"]).startswith("/"):
         args += ["-e", "HF_HUB_OFFLINE=1", "-e", "TRANSFORMERS_OFFLINE=1"]
     ep = str(v.get("entrypoint") or "")
