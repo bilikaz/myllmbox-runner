@@ -213,12 +213,64 @@ def _prelaunch_memory(cfg: dict[str, Any]) -> None:
         log.info("memory: evicted all checkpoints under %s from the page cache on every node (no root) — MemFree now %s GiB", host_dir, "/".join(free_after))
 
 
+# Probe one RDMA device on a node: "<state> <netdev> <ipv4|->"; plus its siblings = the other ACTIVE ports of the same
+# speed (the DGX Spark's ConnectX-7 hangs off two PCIe Gen5 x4 links, each its own verbs device; only both together
+# give the card's bandwidth). Emits "DEV <hca> <state> <netdev> <ipv4|->" for the device and each sibling.
+_HCA_PROBE = r"""for d in /sys/class/infiniband/*; do n=$(basename $d); st=$(cat $d/ports/1/state 2>/dev/null | awk '{print $2}');
+ rt=$(cat $d/ports/1/rate 2>/dev/null | awk '{print $1}'); nd=$(ls $d/device/net 2>/dev/null | head -1);
+ ip=$(ip -4 -o addr show "$nd" 2>/dev/null | awk '{print $4}' | head -1); echo "DEV $n ${st:-?} ${rt:-?} ${nd:--} ${ip:--}"; done"""
+
+
+def _prelaunch_rdma(cfg: dict[str, Any]) -> None:
+    """Every HCA named in cluster.yaml must be ACTIVE and its netdev must carry an IPv4 on EVERY node — RoCE v2 GIDs come
+    from the address; a listed device without one fails NCCL init with an opaque "unhandled system error" (2026-09-07).
+    Also points out an unused sibling (the second PCIe half of the same card) so the user knows there is bandwidth left."""
+    c = cfg.get("cluster") or {}
+    hcas = c.get("ib_hcas") or []
+    hosts = c.get("ssh_hosts") or c.get("nodes") or []
+    problems, hints = [], []
+    for rank, spec in enumerate(hcas):
+        want = [h for h in str(spec or "").split(",") if h]
+        if not want:
+            continue
+        devs = {}
+        for line in (_node_sh(cfg, rank, _HCA_PROBE) or "").splitlines():
+            f = line.split()
+            if len(f) == 6 and f[0] == "DEV":
+                devs[f[1]] = {"state": f[2], "rate": f[3], "netdev": f[4], "ip": f[5]}
+        box = hosts[rank] if rank < len(hosts) else f"rank {rank}"
+        for h in want:
+            d = devs.get(h)
+            if not d:
+                problems.append(f"{box}: RDMA device {h} not found (ls /sys/class/infiniband)")
+            elif d["state"] != "ACTIVE":
+                problems.append(f"{box}: {h} port is {d['state']}, not ACTIVE (cable/link)")
+            elif d["ip"] == "-":
+                problems.append(f"{box}: {h} is ACTIVE but its netdev {d['netdev']} has no IPv4 — RoCE v2 needs one. "
+                                f"Root, once: sudo nmcli con mod \"$(nmcli -t -f NAME,DEVICE con show | grep ':{d['netdev']}$' | cut -d: -f1)\" "
+                                f"ipv4.method link-local ipv6.method disabled && sudo nmcli con up \"$(nmcli -t -f NAME,DEVICE con show | grep ':{d['netdev']}$' | cut -d: -f1)\" ; or drop it from ib_hca")
+        if want and all(devs.get(h, {}).get("ip", "-") != "-" for h in want):
+            rate = devs[want[0]]["rate"]
+            sib = [n for n, d in devs.items() if n not in want and d["state"] == "ACTIVE" and d["rate"] == rate]
+            if sib:
+                hints.append(f"{box}: {', '.join(sib)} is ACTIVE at the same {rate} Gb/s but unused (netdev "
+                             f"{', '.join(devs[n]['netdev'] + (' has ' + devs[n]['ip'] if devs[n]['ip'] != '-' else ' has no IPv4') for n in sib)})"
+                             f" — the other PCIe half of the same card; cluster/setup.sh adds it")
+    for h in hints:
+        log.info("rdma: %s", h)
+    if problems:
+        raise SystemExit("rdma pre-flight failed:\n  " + "\n  ".join(problems) +
+                         "\n  → fix the box (or rerun cluster/setup.sh, which re-validates every link) and launch again")
+
+
 def start(cfg: dict[str, Any]) -> None:
     s = cfg["server"]
     if not s.get("command") and not s["model"]:
         raise SystemExit("server.model is required (or set server.command for a generic server)")
     ns = nodes(cfg)
     stop(cfg)  # clear stale containers on every node first
+    if len(ns) > 1:
+        _prelaunch_rdma(cfg)
     _prelaunch_memory(cfg)
     if len(ns) > 1:
         nn, master = len(ns), ns[0]

@@ -64,6 +64,20 @@ detect_box() {  # <user@host> — probes over ssh, or locally when it's this mac
   if is_local "$host"; then bash -c "$script"; else ssh -o BatchMode=yes "$1" "$script"; fi
 }
 
+# The OTHER PCIe half of the same RDMA card: on a DGX Spark the ConnectX-7 sits on two PCIe Gen5 x4 links and shows as
+# two verbs devices (rocep1s0f1 + roceP2p1s0f1); each carries ~13 GB/s, NCCL striped over both ~20 GB/s. Emits
+# "SIB <hca> <netdev> <ipv4|->" for every ACTIVE device of the same port speed other than the given one.
+hca_siblings() {  # <user@host> <hca>
+  local host="${1##*@}" script='
+    h="$1"; rt=$(cat /sys/class/infiniband/$h/ports/1/rate 2>/dev/null | awk "{print \$1}")
+    for d in /sys/class/infiniband/*; do n=$(basename $d); [ "$n" = "$h" ] && continue
+      st=$(cat $d/ports/1/state 2>/dev/null | awk "{print \$2}"); r=$(cat $d/ports/1/rate 2>/dev/null | awk "{print \$1}")
+      [ "$st" = ACTIVE ] && [ "$r" = "$rt" ] || continue
+      nd=$(ls $d/device/net 2>/dev/null | head -1); ip=$(ip -4 -o addr show "$nd" 2>/dev/null | awk "{print \$4}" | head -1)
+      echo "SIB $n ${nd:--} ${ip:--}"; done'
+  if is_local "$host"; then bash -c "$script" _ "$2"; else ssh -o BatchMode=yes "$1" "bash -c $(printf %q "$script") _ $(printf %q "$2")"; fi
+}
+
 # All non-mgmt interconnect-candidate interfaces on a box → lines "iface ip hca" (hca "-" if none). Used by
 # mesh.sh to probe every possible link (incl. splitter sub-interfaces), not just the one setup.sh picked.
 box_candidates() {  # <box>
@@ -114,17 +128,31 @@ wizard_add_box() {  # <default-name>
     done
     local sel; read -rp "  choice [$((cand[0]+1))]: " sel; idx=$(( ${sel:-$((cand[0]+1))} - 1 ))
   fi
-  local ic_iface="${names[$idx]}" ic_ip="${ips[$idx]}" hca="${hcas[$idx]}"
+  local ic_iface="${names[$idx]}" ic_ip="${ips[$idx]}" hca="${hcas[$idx]}" hca_yaml=""
   [ "$hca" = "-" ] && hca=""
+  if [ -n "$hca" ]; then
+    # the second PCIe half of the card: use it when its netdev already has an IPv4 (RoCE v2 needs one); otherwise
+    # say exactly what to do (root — this script never runs it) and pin the one device that works.
+    hca_yaml="$hca"; local _s sn snd sip
+    while read -r _s sn snd sip; do
+      if [ "$sip" != "-" ]; then hca_yaml="[$hca, $sn]"; echo "  ✓ second PCIe half $sn ($snd $sip) — NCCL will stripe over both" >&2
+      else
+        echo "  ⚠ $sn is the other PCIe half of the same card (ACTIVE, ~13 GB/s more) but $snd has no IPv4, so it stays unused." >&2
+        echo "    To enable (root, once, on this box), then rerun cluster/setup.sh:" >&2
+        echo "      sudo nmcli con mod \"\$(nmcli -t -f NAME,DEVICE con show | grep ':$snd\$' | cut -d: -f1)\" ipv4.method link-local ipv6.method disabled" >&2
+        echo "      sudo nmcli con up \"\$(nmcli -t -f NAME,DEVICE con show | grep ':$snd\$' | cut -d: -f1)\"" >&2
+      fi
+    done < <(hca_siblings "$tgt" "$hca" | grep '^SIB ')
+  fi
   {
     echo "  $name:"
     echo "    host: $host"
     echo "    interconnect: $ic_ip"
     echo "    iface: $ic_iface"
-    [ -n "$hca" ] && echo "    ib_hca: $hca"
+    [ -n "$hca" ] && echo "    ib_hca: $hca_yaml"
     echo "    ssh_user: $user"
   } >> cluster.yaml
-  echo "  ✓ $name → interconnect $ic_ip via $ic_iface${hca:+, hca $hca}" >&2
+  echo "  ✓ $name → interconnect $ic_ip via $ic_iface${hca:+, hca $hca_yaml}" >&2
 }
 
 # run a command on a box: locally if it's this machine, else over ssh. Extra ssh opts via $SSH_OPTS.
