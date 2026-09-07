@@ -1,0 +1,36 @@
+6.17.0-1014-nvidia
+file /m/model-00008-of-00021.safetensors  size 4.00 GiB  region 3.00 GiB  rows 1572864 x 2048 B  gather 4096 rows
+gpu NVIDIA GB10  sm_121  pageableMemoryAccess=1  usesHostPageTables=1
+
+[1] file mmap, cache evicted (cold, NVMe faults)
+  gpu gather @ mmap (cold)              325.04 ms      8.39 MB      25.8 MB/s  ok
+[2] same rows again (page cache warm)
+  gpu gather @ mmap (warm)                0.51 ms      8.39 MB   16350.8 MB/s  ok
+  gpu gather @ mmap (warm, 2nd)           0.02 ms      8.39 MB  346522.1 MB/s  ok
+[3] anonymous host memory (malloc + memcpy of the region)
+  (filled 3.00 GiB in 2468 ms — this also warms the whole file's page cache)
+  gpu gather @ malloc (first touch)       0.31 ms      8.39 MB   26875.6 MB/s  ok
+  gpu gather @ malloc (2nd)               0.03 ms      8.39 MB  302357.6 MB/s  ok
+[4] cudaMalloc'd device copy (resident table, the baseline)
+  gpu gather @ device                     0.44 ms      8.39 MB   19175.9 MB/s  ok
+  gpu gather @ device (2nd)               0.02 ms      8.39 MB  349292.5 MB/s  ok
+[5] mmap, whole region warm, new random rows
+  gpu gather @ mmap (all warm)           51.97 ms      8.39 MB     161.4 MB/s  ok
+  gpu gather @ device (same rows)         0.27 ms      8.39 MB   31498.2 MB/s  ok
+[5b] one-row launches on a warm-cache, PTE-less mapping (GPU page fault per launch)
+  1 row, PTE absent                      196.7 us per launch (fault + read)
+  1 row, CPU pre-touched                   7.1 us per launch (no fault)
+  1 row, device copy                       6.2 us per launch
+  CPU touch, warm cache, PTE absent        1.2 us per page (sink 0)
+[5c] 4096 random rows, page cache warm
+  gpu gather, PTE absent (GPU faults)     49.50 ms      8.39 MB     169.5 MB/s  ok
+  CPU pre-touch of the 4096 rows          4.48 ms (sink 1)
+  gpu gather after CPU pre-touch          0.35 ms      8.39 MB   24134.1 MB/s  ok
+  gpu gather, 2nd                         0.02 ms      8.39 MB  346293.3 MB/s  ok
+[6] streaming: every row of the region once (bandwidth)
+  stream @ mmap (warm)                  978.53 ms   3221.23 MB    3291.9 MB/s  ok
+  stream @ malloc                        20.46 ms   3221.23 MB  157404.8 MB/s  ok
+  stream @ device                        16.93 ms   3221.23 MB  190310.6 MB/s  ok
+  stream @ mmap (COLD, whole region)   4891.73 ms   3221.23 MB     658.5 MB/s  ok
+
+cold/warm per-row: 79.4 us vs 0.1 us over 4096 rows

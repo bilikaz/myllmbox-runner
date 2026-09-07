@@ -1,31 +1,26 @@
-# Qwen3.8-Flash-Next — THE PUBLISHED STACK (2026-09-01): hibrid46 + in-checkpoint int3 PLE.
-# This recipe serves EXACTLY what the world gets:
-#   weights = hf.co/myllmbox/Qwen3.8-Flash-Next-hibrid46  (91G: 4.6-bit hibrid, PLE table shipped
-#             pre-quantized int3 as ordinary checkpoint tensors, declared in config.json)
-#   image   = docker.io/myllmbox/qwen38-flash-next-vllm:v1  (vendor base + the ple_layer patch;
-#             reproducible from builds/qwen38-flash-next/ — ledger + digest in vllm-v1.md there)
-# Self-describing checkpoint: no conversion, no bank, no quant pass, no MBX_PLE env — first boot
-# loads the table from the shards (resident, ~19.2G in the offload worker) and serves in ~15 min.
-# Lineage: hibrid45 champion (renamed ../qwen38-flash-next-off, the offload/bank-era stack) ->
-# hibrid46 test lane (../qwen38-flash-next-test, the lab) -> THIS. Scoreboard (single Spark, K=3,
-# thinking-off code band): c=1 44 / c=2 72 / c=4 103 / c=8 148-158 peak 167.5 aggregate tok/s.
-# async-scheduling ON (corruption suspicion disproved by A/B 2026-09-02 — bad-render rate is the
-# model's own variance, async-off measured WORSE: 4/8 vs 2/8). KV stays bf16 (vendor QSA guard).
+# Qwen3.8-Flash-Next on ONE Spark — v2 (2026-09-07): the hibrid47 champion checkpoint (the cluster's) at TP=1.
+# The 26.9 GiB NVFP4 n-gram (PLE) table is NOT allocated: its 8 shard files are mmapped and the GPU gathers straight
+# out of the mapping (GB10 ATS). Boot holds 73.3 GiB of weights (autotune needs ~34 GB of transient room at TP=1 —
+# a resident table OOMed there), then the table is pulled into the page cache right after warm-up and stays resident.
+# KV is fp8 (PR #54846 ported, patch 06): 391,943 tokens on a 7 GB pin, 262k context native.
+#   weights = hf.co/myllmbox/Qwen3.8-Flash-Next-hibrid47  (98.9 GiB; same bytes as recipes/qwen38-flash-next-cluster)
+#   image   = Dockerfile here → mbx-qwen38-flash-next (v1 base + patches 01-06 in docker/); public twin
+#             myllmbox/qwen38-flash-next-vllm:v2 (builds/qwen38-flash-next/solo/, ledger vllm-v2.md)
+# v1 (hibrid46 + in-checkpoint int3 table in the CPU offload worker, kv 18 G bf16, 44 tok/s sustained) = git history
+# of this file up to 2026-09-06 and the kit's tag v1. v2 measured c=1: 50–51 tok/s sustained, 54.6 peak, 14.4 steps/s
+# flat; c=4: 124 avg / 137 peak. Thinking on, one 30k-token request: 42 avg (39 thinking, 51 code), same 14.4 steps.
 #
-# Fresh box:  ./download.sh myllmbox/Qwen3.8-Flash-Next-hibrid46   (then point model: below at it)
-# Our head box already holds the same bytes at models/export/ (the upload source).
+# Memory on the box (119.7 GiB): GPU process 85 GB (73.3 weights + 7 pool + graphs) + table page cache 27 GB + host
+# heaps 7 GB. The kernel keeps ~6–8 GB FREE but fragmented; a full populate parks ~6 GB of cold heaps in swap once
+# (swap-ins ≈ 0 afterwards). No dashboard on this recipe — it is the memory we lack.
+#
+# Fresh box:  ./download.sh myllmbox/Qwen3.8-Flash-Next-hibrid47   then  ./run.sh qwen38-flash-next
 
 server:
-  image: myllmbox/qwen38-flash-next-vllm:v1     # pinned public tag, pushed 2026-09-02
-                                                # digest: sha256:92ccd7de6d80b9597844d7a5bffb9ded4067dd323129e18bc24192c00dac09ad
-  cpuset: "5-9,15-19"                           # the 10 Cortex-X925 3.9GHz cores (0-4,10-14 = A725
-                                                # 2.8GHz) — pin A/B'd +2-3% at every concurrency
+  image: mbx-qwen38-flash-next                  # built from ./Dockerfile by run.sh / build-and-copy.sh
+  cpuset: "5-9,15-19"                           # the 10 Cortex-X925 3.9GHz cores (0-4,10-14 = A725 2.8GHz) — +2-3 %
   entrypoint: vllm                              # plain `vllm serve` — the checkpoint is final
-  model: /models/myllmbox/Qwen3.8-Flash-Next-hibrid46   # == the HF repo id (./download.sh lands here).
-                                                # PENDING MOVE (blocked on the running upload): bytes
-                                                # currently at models/export/...-hf; the full-fat local
-                                                # conversion at this path renames to ...-hibrid46-off
-                                                # first (the bf16-table reference lane's checkpoint).
+  model: /models/myllmbox/Qwen3.8-Flash-Next-hibrid47   # == the HF repo id (./download.sh lands here)
   cache: recipes/qwen38-flash-next/.data/cache
   min_avail_gb: 100                             # wait for unified memory after a teardown (phantom OOM otherwise)
 
@@ -33,7 +28,15 @@ server:
     HF_HUB_OFFLINE: "1"
     TRANSFORMERS_OFFLINE: "1"
     HF_HUB_DISABLE_XET: "1"
-    VLLM_PLE_CPU_OFFLOAD: "1"                   # the vendor's own offload switch — the only PLE knob
+    # The n-gram table: demand-paged from the checkpoint files (patch 04/05). No VLLM_PLE_CPU_OFFLOAD, no MBX_PLE_REPLICATE.
+    MBX_PLE_MMAP: "1"
+    MBX_PLE_MMAP_MODE: "auto"                   # O_DIRECT reads (no page cache, no GPU faults) for the eager boot steps →
+                                                # flips to the mmap/ATS gather when warm-up + graph capture finish. Decode
+                                                # replays always use mmap (the runner records the op). Manual any time:
+                                                # touch .data/cache/mbx-ple-mmap | mbx-ple-nvme  (= /cache/… in the container)
+    MBX_PLE_MMAP_PREWARM: "auto"                # populate the WHOLE table into memory right after the flip (one pass, ~25 s,
+                                                # MADV_POPULATE_READ). Rows the kernel reclaims come back on demand. Force a
+                                                # pass any time: touch .data/cache/mbx-ple-prewarm  (./ple.sh in the kit)
     TORCH_CUDA_ARCH_LIST: "12.1a"
     FLASHINFER_CUDA_ARCH_LIST: "12.1a"
     FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
@@ -41,28 +44,23 @@ server:
     OMP_NUM_THREADS: "8"                        # matched to the 10-core pin
     MBX_VOCAB_GEMV: "1"                         # championship-proven (+5.5% steps)
     VLLM_MARLIN_USE_ATOMIC_ADD: "1"             # Marlin small-N fast path (self-gating)
+    MALLOC_MMAP_THRESHOLD_: "65536"             # glibc: unmap big frees at once instead of keeping them in the heap
+    MALLOC_TRIM_THRESHOLD_: "131072"            # (the loader's garbage otherwise sits resident — and swaps)
 
   vllm:
     served-model-name: Qwen/Qwen3.8-Flash-Next
     tensor-parallel-size: 1
-    distributed-executor-backend: mp            # REQUIRED — PLE worker spawn gap on uniproc
-    gpu-memory-utilization: 0.70
-    kv-cache-memory: "18000000000"              # 18 GB = 579,550 KV tokens (measured)
-    max-model-len: 262144
-    async-scheduling: true                      # +9-12% steps at c=4-5, ~neutral at c=8. The 2026-09-01
-                                                # "corruption" suspicion was DISPROVED by a controlled
-                                                # A/B (async off produced 4/8 bad renders vs 2/8 with it
-                                                # on — that's the model's own thinking-band variance).
-    max-num-seqs: 8
-    max-num-batched-tokens: 8192                # also the image encoder budget: realistic multi-
-                                                # screenshot requests ~2k tokens, one max-res ~4.1k;
-                                                # two untouched max-res (~8.2k) is the first wedge
-    enable-prefix-caching: true                 # WATCH ITEM: mamba/GDN prefix-cache alignment bug
-                                                # reported by peer recipe (Saren) — under investigation;
-                                                # flip false if cached-prefix outputs degrade
+    distributed-executor-backend: mp
+    gpu-memory-utilization: 0.70                # with kv-cache-memory pinned this does not size the KV pool
+    kv-cache-memory: "7000000000"               # 7 GB fp8 = 391,943 tokens (measured); ~1 GB of pool per RUNNING request
+                                                # is GDN state regardless of length. bf16 on the same pin = 217,808
+    kv-cache-dtype: fp8                         # patch 06 (PR #54846 port): fp8_e4m3 main KV on the QSA path; GDN state stays bf16
+    max-model-len: 262144                       # native max; one 262k request = ~4.8 GiB fp8 (7.57 bf16 did not fit an 8 GB pin)
+    async-scheduling: true
+    max-num-seqs: 8                             # ~1 GB of pool each — 8 seats ≈ the pool in state; 4 leaves ~130k tokens of context
+    max-num-batched-tokens: 8192                # also the image encoder budget: one max-res image ~4.1k tokens
+    enable-prefix-caching: true
     enable-auto-tool-choice: true
     tool-call-parser: qwen3_xml
     reasoning-parser: qwen3
-    speculative-config: '{"method":"mtp","num_speculative_tokens":3}'   # K=3 (K=4 = next A/B)
-
-dashboard: sparkdash
+    speculative-config: '{"method":"mtp","num_speculative_tokens":3}'   # K=3: acceptance ~3.5 on code, 2.9 on thinking
