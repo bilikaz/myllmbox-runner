@@ -66,6 +66,12 @@ for box in $BOXES; do
   provision_box "$box"
 done
 
+# 2b. RDMA card halves — a DGX Spark's ConnectX-7 is two PCIe Gen5 x4 links = two devices, ~13 GB/s each; NCCL
+#     striped over both ≈ 20 GB/s. The second one needs an IPv4 (sudo, asks per box); the pair lands in cluster.yaml
+#     only when every box has it. BEFORE the firewall step so the new address gets whitelisted too.
+echo "── RDMA card halves (second PCIe half of each ConnectX; sudo may prompt) ──"
+mesh_rdma_halves
+
 # 3. firewall — open EVERY interconnect IP of every box on all boxes (needs sudo; one prompt per box).
 echo "── firewall (ufw allow all interconnect IPs; sudo may prompt) ──"
 mesh_firewall

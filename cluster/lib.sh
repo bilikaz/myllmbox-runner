@@ -78,6 +78,61 @@ hca_siblings() {  # <user@host> <hca>
   if is_local "$host"; then bash -c "$script" _ "$2"; else ssh -o BatchMode=yes "$1" "bash -c $(printf %q "$script") _ $(printf %q "$2")"; fi
 }
 
+# First RDMA device of a box's ib_hca (a string or a list in cluster.yaml), "" if none.
+cy_hca_first() {  # <box>
+  "$(_py)" -c 'import sys,yaml
+b=((yaml.safe_load(open("cluster.yaml"))or{}).get("boxes") or {}).get(sys.argv[1]) or {}
+h=b.get("ib_hca") or ""; print((h[0] if h else "") if isinstance(h,list) else str(h).split(",")[0])' "$1"
+}
+
+# Give a netdev a persistent link-local IPv4 through NetworkManager (what the Spark's first ConnectX port already
+# uses). ONE sudo call on that box, same pattern as ufw_allow_from: local → sudo bash -c, remote → ssh -t.
+nm_linklocal() {  # <box> <netdev>
+  local box="$1" nd="$2"
+  local inner="con=\$(nmcli -t -f NAME,DEVICE con show | grep ':$nd\$' | cut -d: -f1 | head -1);
+if [ -z \"\$con\" ]; then con=myllmbox-$nd; nmcli con add type ethernet ifname $nd con-name \"\$con\" >/dev/null; fi;
+nmcli con mod \"\$con\" ipv4.method link-local ipv6.method disabled connection.autoconnect yes && nmcli con up \"\$con\" >/dev/null && ip -4 -o addr show $nd | awk '{print \"  ✓ '$nd' \" \$4}'"
+  if is_local "$(box_host "$box")"; then sudo bash -c "$inner"
+  else ssh -t "$(box_target "$box")" "sudo bash -c '$inner'"; fi
+}
+
+# The second PCIe half of every box's RDMA card (see hca_siblings). A half whose interface has no IPv4 cannot carry
+# RoCE v2 at all; give it a link-local address (consent-gated sudo, once per box), then — only when EVERY box with
+# an RDMA device has an addressed sibling — write the pair into cluster.yaml so the runner stripes NCCL over both.
+mesh_rdma_halves() {
+  local box hca tgt out sn snd sip pairs="" missing=0 any=0
+  for box in $(cy_boxes); do
+    hca="$(cy_hca_first "$box")"; [ -n "$hca" ] || continue
+    any=1; tgt="$(box_target "$box")"
+    out="$(hca_siblings "$tgt" "$hca" | grep '^SIB ' | head -1 || true)"
+    if [ -z "$out" ]; then echo "  [$box] $hca — no second ACTIVE port of the same speed (single-link card)"; missing=1; continue; fi
+    read -r _ sn snd sip <<<"$out"
+    if [ "$sip" = "-" ]; then
+      echo "  [$box] $sn is the other PCIe half of the card ($hca's twin, ~13 GB/s more) but $snd has no IPv4."
+      read -rp "        give $snd a link-local address on $box now (sudo on $box; persistent)? [y/N]: " ok
+      case "$ok" in [Yy]*) nm_linklocal "$box" "$snd" || echo "  ⚠ [$box] nmcli failed";; *) echo "  · skipped";; esac
+      out="$(hca_siblings "$tgt" "$hca" | grep '^SIB ' | head -1 || true)"; read -r _ sn snd sip <<<"$out"
+    fi
+    if [ "$sip" != "-" ]; then echo "  [$box] ✓ $hca + $sn ($snd $sip)"; pairs+="$box|$hca|$sn"$'\n'
+    else missing=1; fi
+  done
+  [ "$any" = 1 ] || { echo "  (no RDMA devices in cluster.yaml)"; return 0; }
+  if [ "$missing" = 0 ]; then
+    printf '%s' "$pairs" | "$(_py)" - cluster.yaml <<'PY'
+import sys, yaml
+path = sys.argv[1]; d = yaml.safe_load(open(path)) or {}; boxes = d.get("boxes") or {}
+for line in sys.stdin:
+    if not line.strip(): continue
+    name, a, b = line.rstrip("\n").split("|")
+    if name in boxes: boxes[name]["ib_hca"] = [a, b]
+yaml.safe_dump(d, open(path, "w"), sort_keys=False, default_flow_style=None)
+print("→ cluster.yaml: ib_hca = [first, second] on every box — NCCL stripes over both PCIe halves", file=sys.stderr)
+PY
+  else
+    echo "  → keeping one device per box in cluster.yaml (a listed half without an address would fail NCCL init). Rerun cluster/setup.sh after fixing."
+  fi
+}
+
 # All non-mgmt interconnect-candidate interfaces on a box → lines "iface ip hca" (hca "-" if none). Used by
 # mesh.sh to probe every possible link (incl. splitter sub-interfaces), not just the one setup.sh picked.
 box_candidates() {  # <box>
