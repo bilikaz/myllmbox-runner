@@ -18,6 +18,8 @@ reported. avg/min/max over the steady samples of
     acc len        (1 + Δaccepted / Δdrafts                       — content/checkpoint quality)
     running        (vllm:num_requests_running gauge — proves the rung was actually held)
     prefill-free   (Δ vllm:prompt_tokens_total == 0 in the sample — otherwise the sample is dropped)
+    ttft s         (client-side: first content/reasoning chunk after send, per request — queue + prefill of c
+                    prompts fired together; the one number the decode windows cannot see)
 
 Thinking is a switch: --thinking on|off → chat_template_kwargs.enable_thinking (the model's own toggle;
 completion_tokens counts reasoning + answer either way). Prompts: the built-in code prompt (default),
@@ -140,6 +142,8 @@ class Worker(threading.Thread):
                     for ch in ev.get("choices") or []:
                         d = ch.get("delta") or {}
                         rec["chunks"] += 1
+                        if "ttft" not in rec and (d.get("content") or d.get("reasoning_content")):
+                            rec["ttft"] = time.time() - t0          # time to first token: prompt queue + prefill, client-side
                         rec["reasoning_chars"] += len(d.get("reasoning_content") or "")
                         rec["answer_chars"] += len(d.get("content") or "")
                         if ch.get("finish_reason"):
@@ -153,6 +157,28 @@ class Worker(threading.Thread):
         self.log.append(rec)
 
 
+def _host_io():
+    """Host-side counters when test.py runs ON the serving box (else None): NVMe reads completed (all nvme* devices,
+    /sys/block/*/stat col 1), major page faults and all page faults (/proc/vmstat). Deltas per sample = the demand-paged
+    n-gram table's cost: rows served from NVMe (major) and rows the GPU had to fault back in from the page cache (minor)."""
+    try:
+        reads = sectors = 0; devs = [d for d in os.listdir("/sys/block") if d.startswith("nvme")]
+        if not devs:
+            return None
+        for d in devs:
+            with open(f"/sys/block/{d}/stat") as f:
+                st = f.read().split(); reads += int(st[0]); sectors += int(st[2])   # reads completed, sectors read (512 B)
+        vm = {}
+        with open("/proc/vmstat") as f:
+            for line in f:
+                k, _, v = line.partition(" ")
+                if k in ("pgmajfault", "pgfault"):
+                    vm[k] = int(v)
+        return {"reads": reads, "kb": sectors // 2, "majf": vm.get("pgmajfault", 0), "pgf": vm.get("pgfault", 0)}
+    except OSError:
+        return None
+
+
 def sample_loop(a, t_start, deadline, samples):
     prev = None
     while True:
@@ -163,7 +189,7 @@ def sample_loop(a, t_start, deadline, samples):
         m = _metrics(a.url, a.token)
         cur = {"t": now, "gen": _sum(m, M_GEN), "drafts": _sum(m, M_DRAFTS), "dtok": _sum(m, M_DTOK),
                "acc": _sum(m, M_ACC), "running": _sum(m, M_RUN), "waiting": _sum(m, M_WAIT), "kv": _first(m, M_KV),
-               "prompt": _sum(m, M_PROMPT), "acc_pos": _per_pos(m)}
+               "prompt": _sum(m, M_PROMPT), "acc_pos": _per_pos(m), "io": _host_io()}
         if prev and cur["gen"] is not None and prev["gen"] is not None:
             dt = cur["t"] - prev["t"]
             s = {"t": round(now - t_start), "dt": round(dt, 1), "running": cur["running"], "waiting": cur["waiting"],
@@ -184,11 +210,17 @@ def sample_loop(a, t_start, deadline, samples):
             else:
                 s["steps_ps"] = s["acc_len"] = None
             s["per_stream"] = s["gen_tps"] / s["running"] if s["running"] else None
+            if cur["io"] and prev["io"]:   # host-side: NVMe reads/s, major (disk) and minor (page-cache) faults/s
+                s["nvme_rps"] = (cur["io"]["reads"] - prev["io"]["reads"]) / dt
+                s["nvme_kbps"] = (cur["io"]["kb"] - prev["io"]["kb"]) / dt
+                s["majf_ps"] = (cur["io"]["majf"] - prev["io"]["majf"]) / dt
+                s["minf_ps"] = max(0.0, (cur["io"]["pgf"] - prev["io"]["pgf"]) / dt - s["majf_ps"])
             s["steady"] = bool(s["t"] >= a.warmup and (s["running"] or 0) >= a.c and not s["prompt_tok"])
             samples.append(s)
             print(f"  t={s['t']:4d}s  run={int(s['running'] or 0):2d} wait={int(s['waiting'] or 0):2d}  "
                   f"gen {s['gen_tps']:6.1f} tok/s  per-stream {(s['per_stream'] or 0):5.1f}  "
                   f"steps {(s['steps_ps'] or 0):5.1f}/s  acc {(s['acc_len'] or 0):4.2f}  kv {(s['kv_pct'] or 0):4.1f}%"
+                  f"{'  nvme ' + format(s['nvme_rps'], '4.0f') + ' rd/s ' + format(s['nvme_kbps'], '6.0f') + ' KB/s  err ' + format(s['majf_ps'], '4.0f') + ';' + format(s['minf_ps'], '5.0f') + '/s' if 'nvme_rps' in s else ''}"
                   f"{'  prefill ' + str(int(s['prompt_tok'])) + ' tok' if s['prompt_tok'] else ''}{'' if s['steady'] else '  (not steady)'}",
                   flush=True)
             if s["t"] >= a.warmup and (s["running"] or 0) < a.c:
@@ -253,12 +285,18 @@ def run_hold(a, prompt, c):
                     for i in range(max((len(s["acc_pos"]) for s in steady if s.get("acc_pos")), default=0))],
         "running": stats([s["running"] for s in held]),
         "kv_pct": stats([s["kv_pct"] for s in held]),
+        "nvme_rps": stats([s["nvme_rps"] for s in steady if "nvme_rps" in s]),
+        "nvme_kbps": stats([s["nvme_kbps"] for s in steady if "nvme_kbps" in s]),
+        "majf_ps": stats([s["majf_ps"] for s in steady if "majf_ps" in s]),
+        "minf_ps": stats([s["minf_ps"] for s in steady if "minf_ps" in s]),
         "samples_total": len(samples), "samples_steady": len(steady),
         "requests_completed": len(ok), "requests_failed": len(log) - len(ok), "requests_truncated": truncated,
         "requests_aborted_by_cap": aborted,
         "completion_tokens_total": sum(r["completion_tokens"] for r in ok),
         "avg_completion_tokens": (sum(r["completion_tokens"] for r in ok) / len(ok)) if ok else None,
         "avg_request_s": (sum(r["t1"] - r["t0"] for r in ok) / len(ok)) if ok else None,
+        "ttft_s": stats([r["ttft"] for r in log if "ttft" in r]),           # every request that produced a token, capped ones included
+        "prompt_tokens": stats([r["prompt_tokens"] for r in ok if r.get("prompt_tokens")]),
     }
 
     t_end = time.time()
@@ -282,6 +320,11 @@ def run_hold(a, prompt, c):
         print("  acc by pos  avg (min–max): " + "  ".join(f"p{i+1} {fmt(p, 2)}" for i, p in enumerate(summary["acc_pos"]) if p)
               + "   (P(draft i accepted); acc len = 1 + Σ)", flush=True)
     print(f"  running     avg (min–max): {fmt(summary['running'])}   kv% {fmt(summary['kv_pct'])}", flush=True)
+    if summary["ttft_s"]:
+        print(f"  ttft s      avg (min–max): {fmt(summary['ttft_s'], 2)}   (first token after send, {c} prompts of "
+              f"{summary['prompt_tokens']['avg'] if summary['prompt_tokens'] else 0:.0f} tok fired together = queue + prefill)", flush=True)
+    if summary.get("nvme_rps"):
+        print(f"  host io     nvme {fmt(summary['nvme_rps'], 0)} reads/s, {fmt(summary['nvme_kbps'], 0)} KB/s · err/s {fmt(summary['majf_ps'], 0)};{fmt(summary['minf_ps'], 0)} (major=disk; minor=page cache, idle box ≈ 1,900)   — the demand-paged table's cost while decoding", flush=True)
     if summary["samples_steady"] < max(3, len(held) // 2):
         print("  ⚠ few steady samples — rung not held (max-num-seqs below c? streams finished early → raise --max-tokens; prefill spilling past --warmup → raise it)", flush=True)
     if truncated:
@@ -291,6 +334,7 @@ def run_hold(a, prompt, c):
     print("\n# reports.md row:", flush=True)
     print(f"| {date} | | {c} | {a.prompt} thinking {a.thinking} (steady {period['steady_seconds']}s of {period['seconds']}s watched) | {fmt(summary['gen_tps'], 0)} | "
           f"{fmt(summary['steps_ps'])} | {fmt(summary['acc_len'], 2)} | | per-stream {fmt(summary['per_stream'], 0)}"
+          + (f"; ttft {fmt(summary['ttft_s'], 2)} s" if summary["ttft_s"] else "")
           + (("; acc by pos " + "/".join(f"{p['avg']:.2f}" for p in summary["acc_pos"] if p)) if summary["acc_pos"] else "") + "; test.py |", flush=True)
 
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", a.model).strip("-")            # Qwen/Qwen3.8-Flash-Next → Qwen-Qwen3.8-Flash-Next
@@ -343,12 +387,14 @@ def main():
         rows.append((c, run_hold(a, prompt, c)))
     if len(rows) > 1:
         print("\n# ladder (avg (min–max) over steady samples):", flush=True)
-        print("| c | gen tok/s | per-stream | steps/s | acc len | steady s / watched s |", flush=True)
-        print("|---|---|---|---|---|---|", flush=True)
+        io = any(sm.get("nvme_rps") for _, sm in rows)
+        print("| c | gen tok/s | per-stream | steps/s | acc len | ttft s |" + (" nvme reads/s | err/s maj;min |" if io else "") + " steady s / watched s |", flush=True)
+        print("|---|---|---|---|---|---|" + ("---|---|" if io else "") + "---|", flush=True)
         for c, sm in rows:
             pr = sm["period"]
-            print(f"| {c} | {fmt(sm['gen_tps'], 0)} | {fmt(sm['per_stream'], 0)} | {fmt(sm['steps_ps'])} | "
-                  f"{fmt(sm['acc_len'], 2)} | {pr['steady_seconds']} / {pr['seconds']} |", flush=True)
+            print(f"| {c} | {fmt(sm['gen_tps'], 0)} | {fmt(sm['per_stream'], 0)} | {fmt(sm['steps_ps'])} | {fmt(sm['acc_len'], 2)} | {fmt(sm['ttft_s'], 2)} |"
+                  + (f" {fmt(sm['nvme_rps'], 0) if sm.get('nvme_rps') else '—'} | {fmt(sm['majf_ps'], 0) if sm.get('majf_ps') else '—'};{fmt(sm['minf_ps'], 0) if sm.get('minf_ps') else '—'} |" if io else "")
+                  + f" {pr['steady_seconds']} / {pr['seconds']} |", flush=True)
 
 
 if __name__ == "__main__":
