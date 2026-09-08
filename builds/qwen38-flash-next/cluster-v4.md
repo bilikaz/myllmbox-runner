@@ -1,6 +1,7 @@
 # docker.io/myllmbox/qwen38-flash-next-cluster-vllm:v4
 
-**Published:** 2026-09-08 (pushed from ai1; base layers already on the Hub, only the patch layer uploaded).
+**Published:** 2026-09-08 (pushed from the head DGX Spark; base layers already on the Hub, only the patch layer uploaded).
+**Rebuild:** `docker build -t myllmbox/qwen38-flash-next-cluster-vllm:v4 builds/qwen38-flash-next/cluster/`
 **Digest:** `sha256:91423fc292d527935b2f0363cc614305b1c1a00dc56981953a723abe1b50ed2e`
 **Image id (local, = mbx-qwen38-flash-next-cluster):** `sha256:9b638749b5bc61bf5df039927a90b1297d03e9a5fc879c41d7a044208a3361b2`
 **Reason for a new tag:** adds patch 04 — fp8_e4m3 (and nvfp4, untested) KV cache on the QSA attention path, upstream

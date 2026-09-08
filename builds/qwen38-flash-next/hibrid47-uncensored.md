@@ -1,9 +1,9 @@
 # hf.co/myllmbox/Qwen3.8-Flash-Next-hibrid47-uncensored — the abliterated body on the hibrid47 layout
 
-**Built:** 2026-09-08 on ai1 (`builds/qwen38-flash-next/standardize-flash-next.py` + `quantize-drafter-experts.py`). **Size:** 99.0 GiB,
+**Built:** 2026-09-08 on the head DGX Spark (`builds/qwen38-flash-next/standardize-flash-next.py` + `quantize-drafter-experts.py`; exact commands below). **Size:** 99.0 GiB,
 25 shard files (16 body + model-mtp + 8 ple-nvfp4). **Local:** `models/myllmbox/Qwen3.8-Flash-Next-hibrid47-uncensored` on both boxes.
 **Published:** 2026-09-08 21:30 — https://huggingface.co/myllmbox/Qwen3.8-Flash-Next-hibrid47-uncensored, public + **gated (auto)**,
-commit `d4ceff2e`, 39 files, 106.3 GB. Uploaded from ai1 (v4 image's hf 1.28 + xet): only **2.16 + 0.99 GB actually transferred** —
+commit `d4ceff2e`, 39 files, 106.3 GB. Uploaded from the head Spark (the v4 image's hf 1.28 + xet): only **2.16 + 0.99 GB actually transferred** —
 xet deduplicated the 16 body shards against orcarouter's repo and the 8 table shards against hibrid47's. First commit attempt failed
 with "Private repository storage limit reached" (free plan caps PRIVATE storage; the plan was create-private → upload → flip public):
 for gated releases create the repo public+gated from the start, gating is what protects access.
@@ -12,6 +12,16 @@ for gated releases create the repo public+gated from the start, gating is what p
 body in compressed-tensors (experts NVFP4 W4A16 group-16 fp8 scales; QSA/GDN/shared-expert/lm_head FP8 per-channel; rest bf16),
 bf16 PLE table in shard 2 (102 GB), bf16 fused drafter. Abliteration = Arditi et al., one direction from layer 24, 149 residual
 writers incl. o_proj, GDN out_proj, experts down_proj (49 layers incl. MTP), shared down_proj, embed_tokens + ple.value_proj.
+
+## Rebuild (exact commands, run inside the serving image: torch + safetensors + compressed_tensors)
+```
+IMG=myllmbox/qwen38-flash-next-cluster-vllm:v4; R=/home/valdas/spark-vllm-docker   # the repo checkout; models/ under it
+docker run --rm -v $R:/w --entrypoint python3 $IMG /w/builds/qwen38-flash-next/standardize-flash-next.py \
+  --src /w/models/orcarouter/Qwen3.8-Flash-Next-Uncensored-NVFP4 --table-ref /w/models/myllmbox/Qwen3.8-Flash-Next-hibrid47 \
+  --dst /w/models/myllmbox/Qwen3.8-Flash-Next-hibrid47-uncensored
+docker run --rm -v $R:/w --entrypoint python3 $IMG /w/builds/qwen38-flash-next/quantize-drafter-experts.py \
+  --ckpt /w/models/myllmbox/Qwen3.8-Flash-Next-hibrid47-uncensored --ref /w/models/myllmbox/Qwen3.8-Flash-Next-hibrid47
+```
 
 ## What the standardizer did
 - Table: sampled rows from 6 bf16 shards re-quantized with our quantizer == hibrid47's NVFP4 codes+scales byte for byte →
@@ -43,5 +53,5 @@ under Apache-2.0), and is gated with a research/responsibility agreement. Card: 
 ## Publish procedure (when approved)
 1. `cp hibrid47-uncensored-README.md <ckpt>/README.md`; `cp <hibrid47>/LICENSE <ckpt>/LICENSE` (Qwen license text).
 2. `HfApi().create_repo(…, private=False)` → `update_repo_settings(gated="auto")` (NOT private: the free plan's private-storage cap rejects the commit)
-   → `hf upload` from ai1 (the v4 image's hf 1.28 + xet; table shards dedupe against hibrid47, body shards against orcarouter's
+   → `hf upload` from the head Spark (the v4 image's hf 1.28 + xet; table shards dedupe against hibrid47, body shards against orcarouter's
    if xet dedups across repos — else ~76 GiB transfer) → set public. Then fill the commit id above.

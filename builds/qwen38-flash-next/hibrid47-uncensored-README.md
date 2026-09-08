@@ -70,12 +70,13 @@ quantization cannot change outputs — only speed.
 
 The body's FP8 linears where hibrid47 has bf16 make a step a hair cheaper; everything else is the hibrid47 stack.
 Refusal behaviour: OrcaRouter measured 64–100 % → ~0–3.3 % on harmful prompts with capability within ±2 points of the base;
-we have not re-run that evaluation. The body is OrcaRouter's data-free quantization; hibrid47's body is calibrated
-(GPTQ / SmoothQuant) — a quality difference this card does not quantify.
+myllmbox has not re-run that evaluation, and tool calling on this checkpoint is not yet verified (the original uncensored
+release was reported to break tool calls through its tokenizer; this one carries the base release's tokenizer files). The body is
+OrcaRouter's data-free quantization; hibrid47's body is calibrated (GPTQ / SmoothQuant) — a quality difference this card does not quantify.
 
 ## How to run
 
-The two-Spark kit serves it with one changed line (`model:` in `recipe.yaml`); the myllmbox repo carries the lane
+The two-Spark kit serves it with one changed line (`model:` in `recipe.yaml`); the myllmbox repo has a recipe folder for it,
 `recipes/qwen38-flash-next-uncensored-cluster`. The serving image is the hibrid47 one (patches: GPU-resident NVFP4 table,
 fp8 KV on QSA). This repo is gated — accept the agreement above, then `hf auth login` (or `export HF_TOKEN=…`) before the
 kit downloads; the kit checks and tells you if either is missing.
