@@ -1,0 +1,82 @@
+# Qwen3.8-Flash-Next-hibrid47-UNCENSORED — orcarouter's abliterated body + myllmbox's NVFP4 PLE table, TP=2 across both Sparks.
+# Checkpoint made by builds/qwen38-flash-next/standardize-flash-next.py (2026-09-08): the body is orcarouter's
+# compressed-tensors quantization AS-IS (experts NVFP4 weight-only, attention/GDN/shared-expert/lm_head FP8 per-channel,
+# rest bf16 — data-free, not calibrated), the table is hibrid47's (verified identical on sampled rows), and the MTP
+# drafter's 512 experts were re-quantized from their fused bf16 to per-expert NVFP4 in the body's compressed-tensors
+# format (builds/qwen38-flash-next/quantize-drafter-experts.py; gate/up order verified against hibrid47's drafter).
+# 99.0 GiB — hibrid47 is 98.9. Same stack as recipes/qwen38-flash-next-cluster (own copy of its Dockerfile + docker/, patches 01-04, fp8 KV);
+# the model path and the served name differ.
+#
+# UNCENSORED = abliterated (refusal direction removed, Arditi et al. 2024, by orcarouter). No guardrails. Research /
+# red-teaming / private use; anything public must sit behind its own moderation. Publishing this checkpoint = a GATED
+# HF repo (myllmbox), like orcarouter's.
+#
+# UNTESTED as of writing: first boot pending. Things to watch in the log: compressed-tensors MoE picks the Marlin
+# NVFP4 backend (no native FP4 on GB10); FP8 W8A16 for the QSA/GDN/shared linears; the drafter loads through the same
+# compressed-tensors MoE path as the body — if it does not, drop speculative-config for the first boot.
+#
+# PREREQUISITES: BOTH boxes free. Weights at /models/myllmbox/Qwen3.8-Flash-Next-hibrid47-uncensored on both boxes
+# (run.sh rsyncs; the 8 ple-nvfp4-* shards are hibrid47's — hardlink them on box2 first to save 27 GiB of transfer).
+#
+#   ./run.sh qwen38-flash-next-uncensored-cluster
+
+server:
+  image: mbx-qwen38-flash-next-uncensored-cluster       # built from THIS lane's Dockerfile (= the cluster lane's today)
+  cpuset: "5-9,15-19"
+  entrypoint: vllm
+  model: /models/myllmbox/Qwen3.8-Flash-Next-hibrid47-uncensored
+  cache: recipes/qwen38-flash-next-uncensored-cluster/.data/cache
+  min_avail_gb: 100                             # wait for unified memory after a teardown (phantom OOM otherwise)
+
+  env:
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    HF_HUB_DISABLE_XET: "1"
+    # NO VLLM_PLE_CPU_OFFLOAD / MBX_PLE_MULTINODE: the NVFP4 table is an ordinary GPU parameter (patch 03).
+    MBX_PLE_REPLICATE: "1"                        # full 28.6 GiB table on each box, no all-reduce — the measured layout.
+                                                  # Unset = half per box (14 GiB freed → kv pin up to 40 G, ~80 seats;
+                                                  # c=1 steps within 1 %) — measure before publishing numbers from it.
+    TORCH_CUDA_ARCH_LIST: "12.1a"
+    FLASHINFER_CUDA_ARCH_LIST: "12.1a"
+    FLASHINFER_WORKSPACE_BASE: /cache/flashinfer-workspace
+    VLLM_CACHE_ROOT: /cache/vllm-cache
+    OMP_NUM_THREADS: "8"
+    MBX_VOCAB_GEMV: "1"
+    VLLM_MARLIN_USE_ATOMIC_ADD: "1"
+    NCCL_IB_GID_INDEX: "3"
+    NCCL_IB_ROCE_VERSION_NUM: "2"
+    NCCL_IB_ADDR_FAMILY: "AF_INET"
+    NCCL_CROSS_NIC: "1"
+    NCCL_IGNORE_CPU_AFFINITY: "1"
+    NCCL_CUMEM_ENABLE: "0"
+    NCCL_NVLS_ENABLE: "0"
+
+  vllm:
+    served-model-name: Qwen/Qwen3.8-Flash-Next-Uncensored
+    pipeline-parallel-size: 1
+    distributed-executor-backend: mp
+    gpu-memory-utilization: 0.7                   # with kv-cache-memory pinned this does not size the KV pool
+                                                  # (verified 2026-09-06: 65 GiB of weights + the pin boot at 0.70)
+    kv-cache-memory: "28000000000"                # 28 GB/box as hibrid47 (same checkpoint size to within 0.1 GiB).
+                                                  # fp8: 2,846,834 tokens on hibrid47; expect the same here.
+    kv-cache-dtype: fp8                           # patch 04 (PR #54846 port, = solo patch 06): fp8_e4m3 main KV on the QSA
+                                                  # path; GDN state stays bf16. Same pin, ~1.7× the seats.
+    max-model-len: 262144
+    async-scheduling: true
+    max-num-seqs: 32                              # as the v2.1 kit: ~1.9 % of the pool per running request (GDN state), 32
+                                                  # seats × ~80k tokens of pool each.
+    max-num-batched-tokens: 8192
+    enable-prefix-caching: true
+    enable-auto-tool-choice: true
+    tool-call-parser: qwen3_xml
+    reasoning-parser: qwen3
+    speculative-config: '{"method":"mtp","num_speculative_tokens":4}'
+
+cluster:
+  boxes: [box1, box2]
+  ib_links: 1                                 # RDMA devices per box (1|2). 2 = NCCL striped over both PCIe halves of the CX7 —
+                                              # A/B 2026-09-07: c=1 17.5 vs 17.7 steps/s, c=32 3.8–3.9 vs 4.0 (link use 0.74 GB/s of
+                                              # 12.8 per half: bandwidth was never the limit; the per-QP overhead is). Keep 1 here.
+  master_port: 25000
+
+dashboard: sparkdash
