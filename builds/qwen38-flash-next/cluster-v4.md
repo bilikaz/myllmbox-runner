@@ -9,7 +9,8 @@ PR #54846 ported (the same port as the solo image v2's patch 06). v3 stays as pu
 
 ## What changed vs v3
 `cluster/docker/patches/04-qsa-fp8-nvfp4-kv.py`: whole-file overlays of `models/qwen3_8_flash_next/nvidia/qsa.py`,
-`.../ops/qsa.py` and `platforms/interface.py` (anchor-asserted against the v1 base; provenance in `docker/overlays/`),
+`.../ops/qsa.py` and `platforms/interface.py` (the patch asserts anchors AND sha256 of both the v1 base files and the overlays
+at build time — provenance is checked, not documented),
 the PR's 13 numerical tests in `docker/tests/` (pass on the GB10). Patches 01–03 byte-identical to v3. The recipe image
 `mbx-qwen38-flash-next-cluster` (id 9b638749) IS this image: same base digest, same four patch files, same converter —
 tagged, not rebuilt.
