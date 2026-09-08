@@ -163,3 +163,15 @@ only) → runner fix; boot 2 healthy 712 s, graphs 2.41/1.65 GiB (vs 1.88/1.03 s
 | 32 | 4.0 steps/s · 533 avg · 579 peak | 3.8–3.9 · 506–526 | ~0.7 GB/s → 369+367 MB/s (5.7 % of one half) |
 Verdict: striping works, bandwidth was never the limit (<6 % of one half at c=32); the per-QP overhead costs 1–5 %. Recipe stays
 `ib_links: 1`; 2 remains available for models whose collectives can fill ~13 GB/s (Khen's DS-V4 +14 % at QPS=4 is that case).
+
+## Jumbo frames (MTU 9000 on both interconnect lanes, both boxes) — 2026-09-07 23:09 boot, one lane (`ib_links: 1`), K=4, pasture
+RoCE active_mtu 1024 → 4096 (nmcli 802-3-ethernet.mtu 9000 on netplan-enp1s0f1np1 + myllmbox-enP2p1s0f1np1). Boot healthy 720 s;
+graph capture 2.34 GiB (single-lane MTU 1500 boot: 1.88; dual: 2.41) — cause not pinned (NCCL buffers vs the socket-iface list).
+| c | MTU 1500, one lane | MTU 9000, one lane |
+|---|---|---|
+| 1 | 17.5–17.7 steps/s · 74–76 avg | 17.6 (17.2–17.9, 6 runs) · 70–75 |
+| 32 | 4.0 · 533 avg · 579 peak | 4.0 (3.9–4.1) · 534 avg (509–560) · 251 ms/step |
+Verdict: no measurable change — decode traffic is 1–6 % of one lane, so packet count is not on the critical path either. Prefill
+NOT measured by this bench: every c=32 run prefills the same 37,366 prompt tokens inside the first 20 s (deterministic 17,510 /
+19,856 split; a 9,336 / 28,030 split on one run was the 10 s tick landing earlier, same total). A lane/MTU prefill effect needs a
+single 32k–100k-token prompt with time-to-first-token as the metric. Boxes left at MTU 9000 (harmless); `ib_links` stays 1.

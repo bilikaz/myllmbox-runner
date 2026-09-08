@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.6
 # ------------------------------------------------------------------------------------------------------
-# mbx-qwen38-flash-next-cluster — the PUBLISHED qwen38-flash-next image + three patches (hibrid47 stack).
+# mbx-qwen38-flash-next-cluster — the PUBLISHED qwen38-flash-next image + four patches (hibrid47 stack, fp8 KV).
 #
 # BASE = docker.io/myllmbox/qwen38-flash-next-vllm:v1 (our own release, 2026-09-02; reproducible from
 # builds/qwen38-flash-next/ — vendor SM121 vLLM base + the ple_layer patch set). Pinned by digest.
@@ -13,6 +13,8 @@
 #       docker/make-hibrid47.py — shipped in the image at /opt/mbx/) and VLLM_PLE_CPU_OFFLOAD is off, the table is
 #       an ordinary resident GPU parameter, row-sharded over TP (or a full copy per rank with MBX_PLE_REPLICATE=1),
 #       gathered + dequantized in-forward inside the CUDA graphs. No CPU worker, no IPC. +8–11 % engine steps.
+#   04  fp8_e4m3 / nvfp4 KV cache on the QSA path = upstream PR #54846 ported (docker/overlays/, whole-file overlays;
+#       docker/tests/test_qsa_kv_quant.py = the PR's tests). Same port as the solo recipe's patch 06. --kv-cache-dtype fp8.
 #
 # `./run.sh qwen38-flash-next-cluster` builds this → mbx-qwen38-flash-next-cluster and ships it to box2.
 # Public twin: builds/qwen38-flash-next/cluster/Dockerfile → myllmbox/qwen38-flash-next-cluster-vllm:v3.
@@ -20,10 +22,12 @@
 FROM myllmbox/qwen38-flash-next-vllm:v1@sha256:92ccd7de6d80b9597844d7a5bffb9ded4067dd323129e18bc24192c00dac09ad
 LABEL org.opencontainers.image.source="https://github.com/bilikaz/myllmbox" \
       mbx.base="myllmbox/qwen38-flash-next-vllm:v1@sha256:92ccd7de" \
-      mbx.patches="ple-offload-multinode loader-drop-page-cache ple-gpu-nvfp4"
+      mbx.patches="ple-offload-multinode loader-drop-page-cache ple-gpu-nvfp4 qsa-fp8-kv"
 
 COPY docker/patches/ /opt/mbx/patches/
 COPY docker/make-hibrid47.py /opt/mbx/make-hibrid47.py
+COPY docker/overlays/ /opt/mbx/overlays/
+COPY docker/tests/ /opt/mbx/tests/
 RUN set -e; for p in /opt/mbx/patches/0*.py; do echo "== $p"; python3 "$p"; done
 
 # Sanity: gates present, modules import, the NVFP4 table method round-trips a synthetic row against the converter.
@@ -46,5 +50,7 @@ y = pl._MbxNvfp4EmbeddingMethod().embedding(lay, torch.arange(64)); rel = ((y - 
 assert rel < 0.12, rel
 y2 = pl._MbxNvfp4EmbeddingMethod().embedding(lay, torch.arange(64).view(4, 16)); assert tuple(y2.shape) == (4, 16, 160)
 import vllm.v1.ple_offload.worker, vllm.v1.ple_offload.connector
-print(f"mbx-qwen38-flash-next-cluster: patches 01-03 present; nvfp4 round-trip rel err {rel:.3f}; vllm {vllm.__version__}")
+assert "_QSA_KV_CACHE_DTYPES" in (root / "models/qwen3_8_flash_next/nvidia/qsa.py").read_text()
+assert "KV_QUANT_FP8" in (root / "models/qwen3_8_flash_next/nvidia/ops/qsa.py").read_text()
+print(f"mbx-qwen38-flash-next-cluster: patches 01-04 present; nvfp4 round-trip rel err {rel:.3f}; vllm {vllm.__version__}")
 PY

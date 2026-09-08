@@ -50,12 +50,16 @@ server:
     distributed-executor-backend: mp
     gpu-memory-utilization: 0.7                   # with kv-cache-memory pinned this does not size the KV pool
                                                   # (verified 2026-09-06: 65 GiB of weights + the pin boot at 0.70)
-    kv-cache-memory: "28000000000"                # 28 GB/box = 1.71M pooled tokens; 48 streams fill it over a 400 s hold.
+    kv-cache-memory: "26000000000"                # 28 GB/box. bf16 = 1.71M pooled tokens (48 streams filled it over a 400 s
+                                                  # hold); fp8 ≈ 1.74× that (solo: 56k tok/GB vs 32k) → ~3M expected.
                                                   # After capture: ~5 GB available/box, box2 touched swap (3 GB) on the
-                                                  # first boot — 25 G (1.52M tokens, 49 seats) is the no-swap setting.
+                                                  # first boot — 25 G is the no-swap setting.
+    kv-cache-dtype: fp8                           # patch 04 (PR #54846 port, = solo patch 06): fp8_e4m3 main KV on the QSA
+                                                  # path; GDN state stays bf16. Same pin, ~1.7× the seats.
     max-model-len: 262144
     async-scheduling: true
-    max-num-seqs: 48                              # the seat ceiling: 48 streams reach 98.9 % of the pool in 400 s
+    max-num-seqs: 64                              # bf16: 48 streams reached 98.9 % of the pool in 400 s; fp8 pool ≈ 1.7× →
+                                                  # 64 seats ≈ 75 % of it over the same hold. To be measured.
     max-num-batched-tokens: 8192
     enable-prefix-caching: true
     enable-auto-tool-choice: true
